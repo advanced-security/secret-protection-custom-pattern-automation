@@ -464,6 +464,35 @@ function validatePatterns(patternFile: PatternFile): void {
     console.log(chalk.green('✅ Pattern validation completed successfully\n'));
 }
 
+async function fillInPattern(page: Page, pattern: Pattern): Promise<void> {
+    await page.fill('input[name="display_name"]', pattern.name);
+    await page.fill('input[name="secret_format"]', pattern.regex.pattern);
+
+    // open "more options"
+    const moreOptions = await page.locator('div.js-more-options').first(); 
+    await moreOptions.locator('button.js-details-target.Details-content--shown').click();
+    
+    if (pattern.regex.start) {
+        await page.locator('input[name="before_secret"]').click();
+        await page.fill('input[name="before_secret"]', pattern.regex.start);
+    }
+    if (pattern.regex.end) {
+        await page.locator('input[name="after_secret"]').click();
+        await page.fill('input[name="after_secret"]', pattern.regex.end);
+    }
+    if (pattern.regex.additional_match) {
+        for (const [index, rule] of pattern.regex.additional_match.entries()) {
+            await addAdditionalRule(page, rule, 'must_match', index);
+        }
+    }
+    if (pattern.regex.additional_not_match) {
+        for (const [index, rule] of pattern.regex.additional_not_match.entries()) {
+            const offset = pattern.regex.additional_match?.length || 0;
+            await addAdditionalRule(page, rule, 'must_not_match', index + offset);
+        }
+    }
+}
+
 async function processPattern(context: BrowserContext, config: Config, pattern: Pattern): Promise<void> {
     console.log(chalk.bold(`\n🔄 Processing pattern: ${pattern.name}`));
     
@@ -473,9 +502,12 @@ async function processPattern(context: BrowserContext, config: Config, pattern: 
         // Navigate to new pattern page
         const url = buildUrl(config, 'settings/security_analysis/custom_patterns/new');
         await page.goto(url);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('load');
 
-        // Test the pattern first
+        console.log(chalk.blue(`📝 Filling in pattern details for: ${pattern.name}`));
+        await fillInPattern(page, pattern);
+
+        // Test the pattern
         console.log(chalk.blue(`🧪 Testing pattern: ${pattern.name}`));
         await testPattern(page, pattern);
 
@@ -511,46 +543,30 @@ async function processPattern(context: BrowserContext, config: Config, pattern: 
 }
 
 async function testPattern(page: Page, pattern: Pattern): Promise<void> {
-    // Fill in pattern details
-    await page.fill('input[name="display_name"]', pattern.name);
-    await page.fill('textarea[name="secret_format"]', pattern.regex.pattern);
-    
-    if (pattern.regex.start) {
-        await page.fill('textarea[name="before_secret"]', pattern.regex.start);
-    }
-    
-    if (pattern.regex.end) {
-        await page.fill('textarea[name="after_secret"]', pattern.regex.end);
-    }
-
-    // Add additional match rules
-    if (pattern.regex.additional_match) {
-        for (const [index, rule] of pattern.regex.additional_match.entries()) {
-            await addAdditionalRule(page, rule, 'must_match', index);
-        }
-    }
-
-    if (pattern.regex.additional_not_match) {
-        for (const [index, rule] of pattern.regex.additional_not_match.entries()) {
-            const offset = pattern.regex.additional_match?.length || 0;
-            await addAdditionalRule(page, rule, 'must_not_match', index + offset);
-        }
-    }
-
     // Add test data
-    if (pattern.test?.data) {
-        await page.fill('textarea[name="test_data"]', pattern.test.data);
+    if (!pattern.test?.data) {
+        console.warn(chalk.yellow(`⚠️  No test data found for pattern: ${pattern.name}`));
+        return;
     }
+    
+    await page.fill('div.CodeMirror-code', pattern.test.data);
 
-    // Submit test
-    await page.click('button[name="test_pattern"]');
-    await page.waitForLoadState('networkidle');
+    let waiting = true;
 
     // Check for test results
-    const testSuccess = await page.locator('.test-results.success').isVisible();
-    if (!testSuccess) {
-        const errorMessage = await page.locator('.test-results.error').textContent();
-        throw new Error(`Pattern test failed: ${errorMessage}`);
+    while (waiting) {
+        const testSuccess = await page.locator('div.js-test-pattern-matches').textContent();
+
+        if (!testSuccess?.match(/ match$/) && !testSuccess?.includes(' - No matches')) {
+            continue;
+        };
+
+        waiting = false;
+
+        if (testSuccess?.includes('No matches')) {
+            console.warn(chalk.red(`❌ Pattern test failed for: ${pattern.name}`));
+            throw new Error(`Pattern test failed for: ${pattern.name}`);
+        }
     }
     
     console.log(chalk.green(`✅ Pattern test passed: ${pattern.name}`));
@@ -559,9 +575,6 @@ async function testPattern(page: Page, pattern: Pattern): Promise<void> {
 async function addAdditionalRule(page: Page, rule: string, type: 'must_match' | 'must_not_match', index: number): Promise<void> {
     // Click add button to create new additional rule
     await page.click('.js-add-secret-format-button');
-    
-    // Wait for the new rule input to appear
-    await page.waitForSelector(`input[name="post_processing_${index}"]`);
     
     // Fill in the rule
     await page.fill(`input[name="post_processing_${index}"]`, rule);
