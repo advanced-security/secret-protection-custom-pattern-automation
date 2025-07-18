@@ -107,7 +107,8 @@ function parseArgs() {
         headless: args.headless ?? true,
         downloadExisting: args['download-existing'] ?? false,
         validateOnly: args['validate-only'] ?? false,
-        validate: args.validate ?? true
+        validate: args.validate ?? true,
+        debug: args.debug ?? false
     };
 }
 async function login(server) {
@@ -338,30 +339,50 @@ function validatePatterns(patternFile) {
     console.log(chalk.green('✅ Pattern validation completed successfully\n'));
 }
 async function fillInPattern(page, pattern) {
+    console.log(chalk.blue(`Filling in basic pattern information...`));
     await page.fill('input[name="display_name"]', pattern.name);
     await page.fill('input[name="secret_format"]', pattern.regex.pattern);
-    // open "more options"
-    const moreOptions = await page.locator('div.js-more-options').first();
-    await moreOptions.locator('button.js-details-target.Details-content--shown').click();
+    if (pattern.regex.start || pattern.regex.end || pattern.regex.additional_match || pattern.regex.additional_not_match) {
+        // Check if "more options" section exists and expand it
+        const moreOptions = page.locator('div.js-more-options').first();
+        if (await moreOptions.isVisible()) {
+            const detailsButton = moreOptions.locator('button.js-details-target.Details-content--shown');
+            if (await detailsButton.isVisible()) {
+                const isExpanded = await detailsButton.getAttribute('aria-expanded');
+                if (isExpanded !== 'true') {
+                    console.log(chalk.blue(`Expanding more options section...`));
+                    await detailsButton.click();
+                    await page.waitForTimeout(500); // Wait for expansion animation
+                }
+            }
+        }
+    }
     if (pattern.regex.start) {
-        await page.locator('input[name="before_secret"]').click();
-        await page.fill('input[name="before_secret"]', pattern.regex.start);
+        console.log(chalk.blue(`Setting before secret pattern...`));
+        const beforeSecretInput = page.locator('input[name="before_secret"]');
+        await beforeSecretInput.click();
+        await beforeSecretInput.fill(pattern.regex.start);
     }
     if (pattern.regex.end) {
-        await page.locator('input[name="after_secret"]').click();
-        await page.fill('input[name="after_secret"]', pattern.regex.end);
+        console.log(chalk.blue(`Setting after secret pattern...`));
+        const afterSecretInput = page.locator('input[name="after_secret"]');
+        await afterSecretInput.click();
+        await afterSecretInput.fill(pattern.regex.end);
     }
     if (pattern.regex.additional_match) {
+        console.log(chalk.blue(`Adding ${pattern.regex.additional_match.length} additional match rules...`));
         for (const [index, rule] of pattern.regex.additional_match.entries()) {
             await addAdditionalRule(page, rule, 'must_match', index);
         }
     }
     if (pattern.regex.additional_not_match) {
+        console.log(chalk.blue(`Adding ${pattern.regex.additional_not_match.length} additional not-match rules...`));
         for (const [index, rule] of pattern.regex.additional_not_match.entries()) {
             const offset = pattern.regex.additional_match?.length || 0;
             await addAdditionalRule(page, rule, 'must_not_match', index + offset);
         }
     }
+    console.log(chalk.green(`✅ Pattern information filled successfully`));
 }
 async function processPattern(context, config, pattern) {
     console.log(chalk.bold(`\n🔄 Processing pattern: ${pattern.name}`));
@@ -377,7 +398,7 @@ async function processPattern(context, config, pattern) {
         console.log(chalk.blue(`🧪 Testing pattern: ${pattern.name}`));
         await testPattern(page, pattern);
         // Perform dry run
-        const dryRunResult = await performDryRun(page, pattern);
+        const dryRunResult = await performDryRun(page, pattern, config);
         // Interactive confirmation based on results
         const shouldProceed = await confirmPatternAction(pattern, dryRunResult, config);
         if (!shouldProceed) {
@@ -428,61 +449,119 @@ async function testPattern(page, pattern) {
     console.log(chalk.blue(`${testSuccess}`));
 }
 async function addAdditionalRule(page, rule, type, index) {
+    console.log(chalk.gray(`  Adding additional rule ${index + 1}: ${type} - ${rule.substring(0, 50)}...`));
     // Click add button to create new additional rule
-    await page.click('.js-add-secret-format-button');
+    const addButton = page.locator('.js-add-secret-format-button');
+    await addButton.click();
+    // Wait for the new rule input to appear
+    await page.waitForSelector(`input[name="post_processing_${index}"]`, { timeout: 5000 });
     // Fill in the rule
     await page.fill(`input[name="post_processing_${index}"]`, rule);
     // Select the appropriate radio button
     await page.check(`input[name="post_processing_rule_${index}"][value="${type}"]`);
+    // Small delay to ensure the change is registered
+    await page.waitForTimeout(200);
 }
-async function performDryRun(page, pattern) {
+async function performDryRun(page, pattern, config) {
     console.log(chalk.yellow(`🧪 Starting dry run for pattern: ${pattern.name}`));
-    let dryRunButton = page.locator('button[form="custom-pattern-form"]');
-    // Click the dry run button
-    while (true) {
-        if (!await dryRunButton.isEnabled()) {
-            console.log('Dry run button not enabled on the page');
-            dryRunButton = page.locator('button[form="custom-pattern-form"]');
-            continue;
-        }
-        break;
+    // Wait for the dry run button to be enabled
+    const dryRunButton = page.locator('button[form="custom-pattern-form"]');
+    await dryRunButton.waitFor({ state: 'visible' });
+    while (!await dryRunButton.isEnabled()) {
+        console.log(chalk.gray('Waiting for dry run button to be enabled...'));
+        await page.waitForTimeout(1000);
     }
-    console.log(page.url());
-    await dryRunButton.click();
-    console.log(chalk.blue(`Clicked dry run button`));
+    console.log(chalk.blue(`Current URL before click: ${page.url()}`));
+    // Take a screenshot in debug mode
+    if (config?.debug) {
+        await page.screenshot({ path: `debug-before-dryrun-${Date.now()}.png`, fullPage: true });
+        console.log(chalk.gray('Debug screenshot taken: before dry run click'));
+    }
+    // Click the dry run button and wait for navigation
+    const [response] = await Promise.all([
+        page.waitForResponse(response => response.url().includes('custom_patterns') && response.status() < 400),
+        dryRunButton.click()
+    ]);
+    console.log(chalk.blue(`Clicked dry run button, response: ${response.status()}`));
+    console.log(response.url());
+    // Check if the response indicates a redirect
+    if (response.status() >= 300 && response.status() < 400) {
+        const redirectUrl = response.headers()['location'];
+        console.log(chalk.blue(`Redirecting to: ${redirectUrl}`));
+        await page.goto(redirectUrl);
+    }
+    // Wait for the page to fully load after redirect
     await page.waitForLoadState('load');
-    console.log(page.url());
+    console.log(chalk.blue(`New URL after redirect: ${page.url()}`));
+    // Take another screenshot in debug mode
+    if (config?.debug) {
+        await page.screenshot({ path: `debug-after-dryrun-${Date.now()}.png`, fullPage: true });
+        console.log(chalk.gray('Debug screenshot taken: after dry run redirect'));
+    }
+    // Extract pattern ID from the URL for tracking
+    const urlParts = page.url().split('/');
+    const patternId = urlParts[urlParts.length - 1];
+    console.log(chalk.blue(`Pattern ID: ${patternId}`));
     // Wait for dry run to complete with progress indicator
     let attempts = 0;
-    const maxAttempts = 60; // Wait up to 5 minutes
-    process.stdout.write('Waiting for dry run to complete');
+    const maxAttempts = 60; // Wait up to 5 minutes - TODO: make configurable, or just remove
+    process.stdout.write(chalk.yellow('Waiting for dry run to complete'));
     while (attempts < maxAttempts) {
-        const form = await page.locator('form.ajax-pagination-form');
-        if (!await form.isVisible()) {
-            console.error(chalk.red('Dry run form not found, exiting...'));
-            throw new Error('Dry run form not found');
-        }
-        console.log(form.textContent());
-        console.log(`\nFound form`);
         try {
-            const status = await form.locator('h5.mt-1').textContent();
-            if (status?.includes('Completed')) {
-                process.stdout.write(chalk.green(' ✓\n'));
-                break;
+            // Look for the dry run status section
+            const statusSection = page.locator('div.js-dry-run-results, .js-custom-pattern-dry-run');
+            if (await statusSection.isVisible()) {
+                // Check for status indicators
+                const statusText = await statusSection.textContent() || '';
+                if (statusText.includes('Completed') || statusText.includes('Complete')) {
+                    process.stdout.write(chalk.green(' ✓\n'));
+                    break;
+                }
+                else if (statusText.includes('Failed') || statusText.includes('Error')) {
+                    process.stdout.write(chalk.red(' ✗\n'));
+                    throw new Error('Dry run failed');
+                }
+                else if (statusText.includes('Queued') || statusText.includes('Running')) {
+                    // Still in progress
+                    process.stdout.write('.');
+                }
+                else {
+                    // Check if results are already available (sometimes the status changes quickly)
+                    const resultsContainer = page.locator('div.js-dry-run-results-container, .js-custom-pattern-dry-run-results');
+                    if (await resultsContainer.isVisible()) {
+                        const resultsText = await resultsContainer.textContent() || '';
+                        if (resultsText.trim().length > 0 && !resultsText.includes('Queued')) {
+                            process.stdout.write(chalk.green(' ✓\n'));
+                            break;
+                        }
+                    }
+                    process.stdout.write('.');
+                }
             }
-            else if (status?.includes('Failed')) {
-                process.stdout.write(chalk.red(' ✗\n'));
-                throw new Error('Dry run failed');
+            else {
+                // Try alternative selectors for the dry run section
+                const alternativeStatus = page.locator('h5.mt-1, .dry-run-status, [data-testid*="dry-run"]');
+                if (await alternativeStatus.first().isVisible()) {
+                    const status = await alternativeStatus.first().textContent();
+                    if (status?.includes('Completed')) {
+                        process.stdout.write(chalk.green(' ✓\n'));
+                        break;
+                    }
+                    else if (status?.includes('Failed')) {
+                        process.stdout.write(chalk.red(' ✗\n'));
+                        throw new Error('Dry run failed');
+                    }
+                }
+                process.stdout.write('.');
             }
         }
         catch (error) {
-            // If we can't find the status, continue waiting
-            console.error(chalk.yellow(' Dry run status not found, exiting...'));
-            break;
+            console.log(chalk.gray(`\nDebug: Attempt ${attempts + 1}, error checking status: ${error}`));
+            process.stdout.write('.');
         }
-        process.stdout.write('.');
         await page.waitForTimeout(5000); // Wait 5 seconds
         await page.reload();
+        await page.waitForLoadState('load');
         attempts++;
     }
     if (attempts >= maxAttempts) {
@@ -497,7 +576,7 @@ async function performDryRun(page, pattern) {
         await displayDryRunResults(results);
     }
     return {
-        id: pattern.name,
+        id: patternId,
         name: pattern.name,
         hits: results.hits,
         results: results.results,
@@ -507,39 +586,147 @@ async function performDryRun(page, pattern) {
 async function getDryRunResults(page) {
     const results = [];
     let hits = 0;
-    // Check if there are any results
-    const noResultsElement = await page.locator('[data-testid="no-dry-run-results"]').isVisible();
-    if (noResultsElement) {
-        return { hits: 0, results: [] };
-    }
-    // Get total count
-    const countElement = await page.locator('[data-testid="dry-run-count"]');
-    if (await countElement.isVisible()) {
-        const countText = await countElement.textContent();
-        hits = parseInt(countText?.match(/\d+/)?.[0] || '0', 10);
-    }
-    // Extract results from all pages
-    let hasNextPage = true;
-    let pageNumber = 1;
-    while (hasNextPage && pageNumber <= 10) { // Limit to 10 pages to avoid infinite loops
-        console.log(`Extracting dry run results from page ${pageNumber}...`);
-        const pageResults = await page.evaluate(() => {
-            const rows = document.querySelectorAll('[data-testid="dry-run-result-row"]');
-            return Array.from(rows).map(row => ({
-                repository: row.querySelector('[data-testid="repository"]')?.textContent?.trim(),
-                file: row.querySelector('[data-testid="file-path"]')?.textContent?.trim(),
-                match: row.querySelector('[data-testid="secret-match"]')?.textContent?.trim()
-            }));
-        });
-        results.push(...pageResults);
-        // Check for next page
-        const nextButton = page.locator('[data-testid="next-page"]');
-        hasNextPage = await nextButton.isVisible() && await nextButton.isEnabled();
-        if (hasNextPage) {
-            await nextButton.click();
-            await page.waitForLoadState('networkidle');
-            pageNumber++;
+    try {
+        // Wait a moment for the results to load
+        await page.waitForTimeout(2000);
+        // Look for the dry run results container
+        const resultsContainer = page.locator('div.js-dry-run-results-container, .js-custom-pattern-dry-run-results, form.ajax-pagination-form');
+        if (!await resultsContainer.first().isVisible()) {
+            console.log(chalk.gray('No dry run results container found'));
+            return { hits: 0, results: [] };
         }
+        // Try to get the count from various possible locations
+        const countSelectors = [
+            'span[data-testid="dry-run-count"]',
+            '.js-dry-run-count',
+            'span:has-text("potential")',
+            'span:has-text("matches")',
+            'h5:has-text("potential")'
+        ];
+        for (const selector of countSelectors) {
+            const countElement = page.locator(selector);
+            if (await countElement.isVisible()) {
+                const countText = await countElement.textContent();
+                const match = countText?.match(/(\d+)\s*potential/i);
+                if (match) {
+                    hits = parseInt(match[1], 10);
+                    console.log(chalk.blue(`Found hit count: ${hits}`));
+                    break;
+                }
+            }
+        }
+        // If we didn't find a count, try to count the actual result rows
+        if (hits === 0) {
+            const resultRows = page.locator('tr[data-testid="dry-run-result-row"], .js-dry-run-result, li.Box-row');
+            const rowCount = await resultRows.count();
+            if (rowCount > 0) {
+                hits = rowCount;
+                console.log(chalk.blue(`Counted ${hits} result rows`));
+            }
+        }
+        // Check for "no results" indicators
+        const noResultsSelectors = [
+            '[data-testid="no-dry-run-results"]',
+            'text="No potential secrets found"',
+            'text="0 potential secrets"',
+            '.js-no-results'
+        ];
+        for (const selector of noResultsSelectors) {
+            if (await page.locator(selector).isVisible()) {
+                console.log(chalk.green('No dry run results found (clean scan)'));
+                return { hits: 0, results: [] };
+            }
+        }
+        // Extract results from the page
+        const resultSelectors = [
+            'tr[data-testid="dry-run-result-row"]',
+            '.js-dry-run-result',
+            'li.Box-row:has(.js-navigation-open)'
+        ];
+        for (const selector of resultSelectors) {
+            const resultElements = page.locator(selector);
+            const count = await resultElements.count();
+            if (count > 0) {
+                console.log(chalk.blue(`Found ${count} result elements using selector: ${selector}`));
+                for (let i = 0; i < count; i++) {
+                    const element = resultElements.nth(i);
+                    try {
+                        // Try different approaches to extract data based on the structure
+                        let repository = '';
+                        let file = '';
+                        let match = '';
+                        // Approach 1: Look for specific data attributes
+                        const repoElement = element.locator('[data-testid="repository"], .js-repo-name');
+                        const fileElement = element.locator('[data-testid="file-path"], .js-file-path');
+                        const matchElement = element.locator('[data-testid="secret-match"], .js-secret-match');
+                        if (await repoElement.isVisible()) {
+                            repository = await repoElement.textContent() || '';
+                        }
+                        if (await fileElement.isVisible()) {
+                            file = await fileElement.textContent() || '';
+                        }
+                        if (await matchElement.isVisible()) {
+                            match = await matchElement.textContent() || '';
+                        }
+                        // Approach 2: If data attributes don't work, try to extract from links and text
+                        if (!repository || !file) {
+                            const linkElements = element.locator('a');
+                            const linkCount = await linkElements.count();
+                            if (linkCount >= 2) {
+                                repository = await linkElements.nth(0).textContent() || '';
+                                file = await linkElements.nth(1).textContent() || '';
+                            }
+                            else if (linkCount === 1) {
+                                const href = await linkElements.nth(0).getAttribute('href') || '';
+                                const parts = href.split('/');
+                                if (parts.length >= 4) {
+                                    repository = `${parts[1]}/${parts[2]}`;
+                                    file = parts.slice(5).join('/');
+                                }
+                            }
+                        }
+                        // Approach 3: Extract text content and try to parse it
+                        if (!match) {
+                            const elementText = await element.textContent() || '';
+                            // Look for patterns that might be the secret match
+                            const lines = elementText.split('\n').map(line => line.trim()).filter(line => line);
+                            for (const line of lines) {
+                                if (line.length > 10 && (line.includes('=') || line.includes(':') || line.includes('"') || line.includes("'"))) {
+                                    match = line;
+                                    break;
+                                }
+                            }
+                        }
+                        if (repository || file || match) {
+                            results.push({
+                                repository: repository.trim(),
+                                file: file.trim(),
+                                match: match.trim()
+                            });
+                        }
+                    }
+                    catch (error) {
+                        console.log(chalk.gray(`Warning: Could not extract data from result ${i}: ${error}`));
+                    }
+                }
+                break; // Found results with this selector, no need to try others
+            }
+        }
+        // If we still don't have results but have a hit count, create placeholder results
+        if (results.length === 0 && hits > 0) {
+            console.log(chalk.yellow(`Found ${hits} hits but could not extract detailed results`));
+            for (let i = 0; i < Math.min(hits, 10); i++) {
+                results.push({
+                    repository: 'Unknown',
+                    file: 'Unknown',
+                    match: `Match ${i + 1} (details not available)`
+                });
+            }
+        }
+        console.log(chalk.blue(`Extracted ${results.length} detailed results`));
+    }
+    catch (error) {
+        console.log(chalk.yellow(`Warning: Error extracting dry run results: ${error}`));
     }
     return { hits, results };
 }

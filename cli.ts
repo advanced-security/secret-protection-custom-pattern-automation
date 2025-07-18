@@ -21,6 +21,7 @@ Options:
   --no-validate        Skip pattern validation
   --headless           Run in headless mode (default: true)
   --no-headless        Run with visible browser
+  --debug              Enable debug mode with screenshots and verbose logging
   --help               Show this help message
 
 Examples:
