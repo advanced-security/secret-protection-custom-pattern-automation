@@ -410,10 +410,10 @@ async function testPattern(page, pattern) {
     }
     await page.fill('div.CodeMirror-code', pattern.test.data);
     let waiting = true;
+    let testSuccess = null;
     // Check for test results
     while (waiting) {
-        const testSuccess = await page.locator('div.js-test-pattern-matches').textContent();
-        console.log(chalk.blue(`🔍 Waiting for result, got: ${testSuccess}`));
+        testSuccess = await page.locator('div.js-test-pattern-matches').textContent();
         if (!testSuccess?.match(/ match$/) && !testSuccess?.includes(' - No matches')) {
             continue;
         }
@@ -425,6 +425,7 @@ async function testPattern(page, pattern) {
         }
     }
     console.log(chalk.green(`✅ Pattern test passed: ${pattern.name}`));
+    console.log(chalk.blue(`${testSuccess}`));
 }
 async function addAdditionalRule(page, rule, type, index) {
     // Click add button to create new additional rule
@@ -436,22 +437,48 @@ async function addAdditionalRule(page, rule, type, index) {
 }
 async function performDryRun(page, pattern) {
     console.log(chalk.yellow(`🧪 Starting dry run for pattern: ${pattern.name}`));
+    let dryRunButton = page.locator('button[form="custom-pattern-form"]');
     // Click the dry run button
-    await page.click('button[form="custom-pattern-form"]');
-    await page.waitForLoadState('networkidle');
+    while (true) {
+        if (!await dryRunButton.isEnabled()) {
+            console.log('Dry run button not enabled on the page');
+            dryRunButton = page.locator('button[form="custom-pattern-form"]');
+            continue;
+        }
+        break;
+    }
+    console.log(page.url());
+    await dryRunButton.click();
+    console.log(chalk.blue(`Clicked dry run button`));
+    await page.waitForLoadState('load');
+    console.log(page.url());
     // Wait for dry run to complete with progress indicator
     let attempts = 0;
     const maxAttempts = 60; // Wait up to 5 minutes
     process.stdout.write('Waiting for dry run to complete');
     while (attempts < maxAttempts) {
-        const status = await page.locator('[data-testid="dry-run-status"]').textContent();
-        if (status?.includes('Completed')) {
-            process.stdout.write(chalk.green(' ✓\n'));
-            break;
+        const form = await page.locator('form.ajax-pagination-form');
+        if (!await form.isVisible()) {
+            console.error(chalk.red('Dry run form not found, exiting...'));
+            throw new Error('Dry run form not found');
         }
-        else if (status?.includes('Failed')) {
-            process.stdout.write(chalk.red(' ✗\n'));
-            throw new Error('Dry run failed');
+        console.log(form.textContent());
+        console.log(`\nFound form`);
+        try {
+            const status = await form.locator('h5.mt-1').textContent();
+            if (status?.includes('Completed')) {
+                process.stdout.write(chalk.green(' ✓\n'));
+                break;
+            }
+            else if (status?.includes('Failed')) {
+                process.stdout.write(chalk.red(' ✗\n'));
+                throw new Error('Dry run failed');
+            }
+        }
+        catch (error) {
+            // If we can't find the status, continue waiting
+            console.error(chalk.yellow(' Dry run status not found, exiting...'));
+            break;
         }
         process.stdout.write('.');
         await page.waitForTimeout(5000); // Wait 5 seconds
