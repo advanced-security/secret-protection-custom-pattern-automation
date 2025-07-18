@@ -111,6 +111,16 @@ function parseArgs() {
     };
 }
 async function login(server) {
+    // look for existing state stored in .state file locally
+    const stateFilePath = path.join(process.cwd(), '.state');
+    try {
+        state = JSON.parse(await fs.readFile(stateFilePath, 'utf-8'));
+        console.log('Using existing authentication state from .state file');
+        return;
+    }
+    catch (error) {
+        console.warn('No existing authentication state found, proceeding with manual login');
+    }
     const browser = await chromium.launch({ headless: false });
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -124,6 +134,7 @@ async function login(server) {
     });
     // Save browser state
     state = await context.storageState();
+    await fs.writeFile(stateFilePath, JSON.stringify(state, null, 2));
     console.log('Login successful, state saved.');
     await browser.close();
 }
@@ -135,47 +146,128 @@ async function downloadExistingPatterns(context, config) {
         console.log(`Navigating to: ${url}`);
         const result = await page.goto(url);
         if (!result || !result.ok()) {
-            throw new Error(`Failed to load page: ${result?.status() || 'unknown error'}`);
-        }
-        console.log('Waiting for page to load...');
-        await page.waitForLoadState('load');
-        const customPatternList = page.locator('.js-custom-pattern-list').first();
-        if (!customPatternList) {
-            console.warn('No custom patterns found on the page');
+            console.error(`Failed to load page: ${result?.status() || 'unknown error'}`);
             return;
         }
-        const patternRows = await customPatternList.locator('li[class="Box-row]').all();
-        if (!patternRows || patternRows.length === 0) {
-            console.warn('No existing patterns found');
-            return;
-        }
+        let keepGoing = true;
         const extractedPatterns = [];
-        for (const row of patternRows) {
-            const link = row.locator('.js-navigation-open').first();
-            if (link) {
-                const name = await link.textContent();
-                const url = await link.getAttribute('href');
-                const id = url?.split('/').pop() || '';
-                console.log(`Found pattern: ${name} (ID: ${id})`);
-                // now get the content of the URL, by loading it and extracting it from the page
-                const patternPage = await context.newPage();
-                const result = await patternPage.goto(`${config.server}${url}`);
-                if (!result || !result.ok()) {
-                    console.warn(`Failed to load pattern page: ${result?.status() || 'unknown error'}`);
-                    continue;
+        let count = 0;
+        let firstPage = true;
+        while (keepGoing) {
+            console.log('Waiting for page to load...');
+            await page.waitForLoadState('load');
+            const customPatternList = page.locator('.js-custom-pattern-list').first();
+            let busy = true;
+            while (busy) {
+                busy = await customPatternList.getAttribute('busy') !== null;
+            }
+            // wait a little longer to ensure the table is fully loaded
+            await page.waitForTimeout(200);
+            if (!customPatternList) {
+                console.warn('No custom patterns found on the page');
+                return;
+            }
+            const customPatternCount = await customPatternList.locator('.js-custom-pattern-total-count').first().textContent();
+            if (!customPatternCount) {
+                console.warn('No custom patterns found on the page');
+                return;
+            }
+            // put out value from text
+            if (firstPage) {
+                firstPage = false;
+                count = parseInt(customPatternCount.match(/\d+/)?.[0] ?? '0', 10);
+                console.log(`Found ${count} existing patterns`);
+            }
+            const patternRows = await customPatternList.locator('li[class="Box-row"]').all();
+            if (!patternRows || patternRows.length === 0) {
+                console.warn('No existing patterns found');
+                return;
+            }
+            for (const row of patternRows) {
+                const link = row.locator('.js-navigation-open').first();
+                if (link) {
+                    const name = await link.textContent();
+                    const url = await link.getAttribute('href');
+                    const id = url?.split('/').pop() || '';
+                    console.log(`Found pattern: ${name} (ID: ${id})`);
+                    // now get the content of the URL, by loading it and extracting it from the page
+                    const patternPage = await context.newPage();
+                    const result = await patternPage.goto(`${config.server}${url}`);
+                    if (!result || !result.ok()) {
+                        console.warn(`Failed to load pattern page: ${result?.status() || 'unknown error'}`);
+                        continue;
+                    }
+                    await patternPage.waitForLoadState('load');
+                    // the data is in HTML content of the page, so we need to use the right locators to get it out
+                    const patternName = await patternPage.locator('#display_name').getAttribute('value');
+                    const secretFormat = await patternPage.locator('#secret_format').getAttribute('value');
+                    const beforeSecret = await patternPage.locator('#before_secret').getAttribute('value');
+                    const afterSecret = await patternPage.locator('#after_secret').getAttribute('value');
+                    const additionalMatches = await patternPage.locator('.js-additional-secret-format').all();
+                    // record if it is published or not
+                    const subHead = await patternPage.locator('h1.Subhead-heading').textContent();
+                    const isPublished = subHead?.includes('Update pattern');
+                    console.log(`Found pattern: ${patternName}`);
+                    console.log(`Secret format: ${secretFormat}`);
+                    console.log(`Before secret: ${beforeSecret}`);
+                    console.log(`After secret: ${afterSecret}`);
+                    // pull out additional matches, and if they are Must match or Must not Match
+                    const additionalMatchRules = new Map();
+                    for await (const match of additionalMatches) {
+                        // skip if it has 'has-removed-contents' set in the class
+                        const className = await match.getAttribute('class');
+                        if (className?.includes('has-removed-contents')) {
+                            continue;
+                        }
+                        console.log("Processing additional match");
+                        const additionalSecretFormat = await match.locator('input[type="text"]').getAttribute('value');
+                        console.log(`Additional secret format: ${additionalSecretFormat}`);
+                        if (!additionalSecretFormat) {
+                            console.warn('No additional secret format found, skipping this match');
+                            continue;
+                        }
+                        // Get the radio button with value='must_match'
+                        const mustMatchRadio = match.locator('input[type="radio"][value="must_match"]');
+                        if (!mustMatchRadio) {
+                            console.warn('No must match radio button found, skipping this match');
+                            continue;
+                        }
+                        const isMustMatch = await mustMatchRadio.isChecked();
+                        // the matchType is a radio button with value 'must_match' or 'must_not_match'
+                        const matchType = isMustMatch ? 'must_match' : 'must_not_match';
+                        console.log(`Match type: ${matchType}`);
+                        if (!additionalMatchRules.has(matchType)) {
+                            additionalMatchRules.set(matchType, []);
+                        }
+                        additionalMatchRules.get(matchType)?.push(additionalSecretFormat);
+                    }
+                    // reprocess additional matches so we can serialize as JSON - so in a plain JS object, not a Map
+                    const additionalMatchesObject = Object.fromEntries(additionalMatchRules.entries());
+                    extractedPatterns.push({
+                        id: id,
+                        name: name,
+                        secret_format: secretFormat,
+                        before_secret: beforeSecret,
+                        after_secret: afterSecret,
+                        additional_matches: additionalMatchesObject,
+                        is_published: isPublished
+                    });
                 }
-                await patternPage.waitForLoadState('load');
-                // the data is in HTML content of the page, so we need to use the right locators to get it out
-                const patternName = await patternPage.locator('#display_name').getAttribute('value');
-                const secretFormat = await patternPage.locator('#secret_format').getAttribute('value');
-                const beforeSecret = await patternPage.locator('#before_secret').getAttribute('value');
-                const afterSecret = await patternPage.locator('#after_secret').getAttribute('value');
-                const additionalMatches = await patternPage.locator('.js-additional-secret-format').all();
-                console.log(`Found pattern: ${patternName}`);
-                console.log(`Secret format: ${secretFormat}`);
-                console.log(`Before secret: ${beforeSecret}`);
-                console.log(`After secret: ${afterSecret}`);
-                // TODO: pull out additional matches, and it they are Must match or Must not Match
+            }
+            // record how many we found on the page
+            count -= patternRows.length;
+            if (count > 0) {
+                console.warn(`⚠️  Found ${count} more patterns, but only processed the first ${patternRows.length} on this page.`);
+            }
+            // find the Next> button
+            const nextButton = customPatternList.locator('button[id="next_cursor_button_udp"]');
+            if (await nextButton.isVisible() && await nextButton.isEnabled()) {
+                await nextButton.click();
+                console.log('Clicked Next button to load more patterns');
+            }
+            else {
+                console.log('No more patterns to load, stopping pagination');
+                keepGoing = false;
             }
         }
         console.log(`Found ${extractedPatterns.length} existing patterns`);
