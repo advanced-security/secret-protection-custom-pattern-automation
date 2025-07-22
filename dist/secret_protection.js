@@ -73,7 +73,8 @@ function parseArgs() {
             scope: 'repo',
             patterns: args.pattern ? (Array.isArray(args.pattern) ? args.pattern : [args.pattern]) : undefined,
             validateOnly: true,
-            validate: true
+            validate: true,
+            dryRunAllRepos: true,
         };
     }
     if (!target) {
@@ -108,7 +109,9 @@ function parseArgs() {
         downloadExisting: args['download-existing'] ?? false,
         validateOnly: args['validate-only'] ?? false,
         validate: args.validate ?? true,
-        debug: args.debug ?? false
+        debug: args.debug ?? false,
+        dryRunAllRepos: args['dry-run-all-repos'] ?? false,
+        dryRunRepoList: args['dry-run-repo-list'] ? (Array.isArray(args['dry-run-repo-list']) ? args['dry-run-repo-list'] : [args['dry-run-repo-list']]) : [],
     };
 }
 async function login(server) {
@@ -143,7 +146,8 @@ async function downloadExistingPatterns(context, config) {
     console.log('Downloading existing patterns...');
     const page = await context.newPage();
     try {
-        const url = buildUrl(config, 'settings/security_analysis');
+        const url_path = config.scope !== 'enterprise' ? 'settings/security_analysis' : 'settings/security_analysis_policies/security_features';
+        const url = buildUrl(config, url_path);
         const result = await page.goto(url);
         if (!result || !result.ok()) {
             console.error(`Failed to load page: ${result?.status() || 'unknown error'}`);
@@ -469,7 +473,8 @@ async function fillInPattern(page, pattern, isExisting = false, config) {
 async function findExistingPatternByName(context, config, patternName) {
     const page = await context.newPage();
     try {
-        const url = buildUrl(config, 'settings/security_analysis');
+        const url_path = config.scope !== 'enterprise' ? 'settings/security_analysis' : 'settings/security_analysis_policies/security_features';
+        const url = buildUrl(config, url_path);
         const result = await page.goto(url);
         if (!result || !result.ok()) {
             console.warn(`Failed to load security analysis page: ${result?.status() || 'unknown error'}`);
@@ -539,7 +544,8 @@ async function processPattern(context, config, pattern) {
         }
         else {
             console.log(chalk.blue(`➕ No existing pattern found, creating new pattern`));
-            url = buildUrl(config, 'settings/security_analysis/custom_patterns/new');
+            const url_path = config.scope !== 'enterprise' ? 'settings/security_analysis/custom_patterns/new' : 'settings/advanced_security/custom_patterns/new';
+            url = buildUrl(config, url_path);
         }
         // Navigate to pattern page (new or existing)
         await page.goto(url);
@@ -573,12 +579,20 @@ async function processPattern(context, config, pattern) {
             });
             enablePushProtectionFlag = enablePushProtection;
         }
-        if (enablePushProtectionFlag) {
-            console.log(chalk.blue(`🛡️  Enabling push protection for pattern: ${pattern.name}`));
-            await enablePushProtection(page, pattern);
+        if (config.scope === 'repo') {
+            if (enablePushProtectionFlag) {
+                console.log(chalk.blue(`🛡️  Enabling push protection for pattern: ${pattern.name}`));
+                await enablePushProtection(page, pattern);
+            }
+            else {
+                await disablePushProtection(page, pattern);
+            }
         }
         else {
-            await disablePushProtection(page, pattern);
+            if (enablePushProtectionFlag) {
+                console.log(chalk.blue(`🛡️  Enabling push protection for pattern: ${pattern.name}`));
+                await togglePushProtectionConfig(page, pattern, config, enablePushProtectionFlag);
+            }
         }
         const actionPast = existingPatternUrl ? 'updated' : 'created';
         console.log(chalk.green(`✅ Successfully ${actionPast} pattern: ${pattern.name}`));
@@ -670,8 +684,9 @@ async function clickAndWaitForRedirect(page, button, config) {
 async function performDryRun(page, pattern, config) {
     console.log(chalk.yellow(`🧪 Starting dry run for pattern: ${pattern.name}`));
     // Wait for the dry run button to be enabled
-    // the class differs at repo and org level - at org level it is js-repo-selector-dialog-summary-button
-    const dryRunButton = page.locator('button.js-save-and-dry-run-button, button.js-repo-selector-dialog-summary-button').first();
+    // repo level class: js-custom-pattern-submit-button
+    // org level class: js-repo-selector-dialog-summary-button
+    const dryRunButton = page.locator('button.js-custom-pattern-submit-button, button.js-save-and-dry-run-button, button.js-repo-selector-dialog-summary-button').first();
     await dryRunButton.waitFor({ state: 'visible' });
     const buttonID = await dryRunButton.getAttribute('id');
     while (!await dryRunButton.isEnabled()) {
@@ -695,9 +710,52 @@ async function performDryRun(page, pattern, config) {
             });
             // Wait for the dialog to appear
             await dialog.waitFor({ state: 'visible' });
-            // Select all repositories, for now, and implement picking 'dry_run_repo_selection_selected_repos' later
-            const repoCheckboxes = dialog.locator('input[type="radio"][id="dry_run_repo_selection_all_repos"]');
-            await repoCheckboxes.check();
+            // Select all repositories if we're in org mode and dryRunAllRepos is true
+            if (config?.dryRunAllRepos && config.scope === 'org') {
+                const repoCheckboxes = dialog.locator('input[type="radio"][id="dry_run_repo_selection_all_repos"]');
+                await repoCheckboxes.check();
+            }
+            else if (config?.dryRunRepoList && (config.scope === 'org' || config.scope === 'enterprise')) {
+                // Select specific repositories
+                for (const repo of config.dryRunRepoList) {
+                    console.log(chalk.blue(`Selecting repository for dry run: ${repo}`));
+                    // put them into the search field
+                    const searchInput = dialog.locator('input#repo_id');
+                    await searchInput.click();
+                    await searchInput.fill(repo);
+                    // Wait for the dropdown to update and be visible
+                    const repoDropDown = dialog.locator(`anchored-position[anchor="repo_id"]`);
+                    await repoDropDown.waitFor({ state: 'visible' });
+                    const repoOptions = await repoDropDown.locator(`div[role="option"]`).all();
+                    let found = false;
+                    for (const option of repoOptions) {
+                        const optionLabel = (await option.locator('span.ActionListItem-label').textContent())?.trim();
+                        console.log(chalk.gray(`Checking repository option: ${optionLabel}`));
+                        if (optionLabel === repo) {
+                            await option.click();
+                            found = true;
+                            console.log(chalk.blue(`Selected repository: ${repo}`));
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        console.warn(chalk.yellow(`Repository "${repo}" not found in the dropdown`));
+                    }
+                }
+                // check if we have any selected repositories
+                await dialog.locator('button[title="Remove dry run repository"]').first().waitFor({ state: 'visible' });
+                const selectedRepos = await dialog.locator('div#dry-run-selected-repos > div > ul > li').all();
+                if (selectedRepos.length === 0) {
+                    console.warn(chalk.yellow('No repositories selected for dry run, please check your configuration'));
+                    return {
+                        id: '',
+                        name: pattern.name,
+                        hits: 0,
+                        results: [],
+                        completed: false
+                    };
+                }
+            }
             // Click the confirm button
             const confirmButton = dialog.locator('button.js-org-repo-selector-dialog-dry-run-button');
             await clickAndWaitForRedirect(page, confirmButton, config);
@@ -731,6 +789,7 @@ async function performDryRun(page, pattern, config) {
             const statusElement = page.locator('span.f6:has-text("Status") + h5');
             const statusText = await statusElement.textContent();
             if (statusText === 'Completed') {
+                process.stdout.write('\n');
                 console.log(chalk.green('✅ Dry run completed successfully'));
                 break;
             }
@@ -738,6 +797,7 @@ async function performDryRun(page, pattern, config) {
                 process.stdout.write('.');
             }
             else {
+                process.stdout.write('\n');
                 console.log(chalk.red(`❌ Dry run failed: ${statusText}`));
                 break;
             }
@@ -791,7 +851,7 @@ async function getDryRunResults(page) {
         }
         // loop over table results, until we have found enough results or exhausted the list
         let resultsProcessed = 0;
-        while (resultsProcessed < count) {
+        while (true) {
             // grab the new results list
             const resultsList = await resultsContainer.locator('div.Box > ul');
             const resultsItems = await resultsList.locator('li').all();
@@ -817,6 +877,9 @@ async function getDryRunResults(page) {
                 });
             }
             resultsProcessed += resultCount;
+            if (resultsProcessed >= count) {
+                break;
+            }
             // find the Next > button, click it, wait for the page to reload
             const nextButton = resultsContainer.locator('button#next_cursor_button');
             if (!await nextButton.isEnabled()) {
@@ -876,6 +939,79 @@ async function disablePushProtection(page, pattern) {
     else {
         console.warn(`Push protection toggle not found for pattern: ${pattern.name}`);
     }
+}
+async function togglePushProtectionConfig(page, pattern, config, enablePushProtectionFlag) {
+    // visit the push protection configuration page
+    const url = buildUrl(config, 'settings/security_analysis/pattern_configurations');
+    await page.goto(url);
+    await page.waitForLoadState('load');
+    // click on the "Custom" tab to show the custom patterns
+    const tabNav = page.locator('nav[aria-label="Table selector"]');
+    const customTab = tabNav.locator('span[data-content="Custom"]').first();
+    await customTab.click();
+    // search for the pattern with the search box, using the `name:"..."` syntax
+    const inputSearchFilter = page.locator('input#pattern-configs-filter-input');
+    await inputSearchFilter.click();
+    await inputSearchFilter.fill(`name:"${pattern.name}"`);
+    // wait for the results to filter down
+    await page.waitForTimeout(200);
+    // find the pattern in the list
+    const tableRows = await page.locator('table > tbody > tr').all();
+    let tableRow = undefined;
+    for (const row of tableRows) {
+        const nameCell = row.locator('td').first();
+        const nameText = (await nameCell.textContent())?.trim();
+        if (nameText === pattern.name) {
+            tableRow = row;
+            break;
+        }
+    }
+    // if we didn't find the pattern, exit
+    if (!tableRow) {
+        console.warn(`Pattern "${pattern.name}" not found in push protection configuration`);
+        return;
+    }
+    // find the push protection toggle in the row
+    const pushProtectionToggle = tableRow.locator('button[data-testid="push-protection-setting"]').first();
+    // get the current state of the toggle
+    const currentState = (await pushProtectionToggle.textContent())?.trim();
+    if ((enablePushProtectionFlag && currentState === 'Enabled') || (!enablePushProtectionFlag && currentState === 'Disabled')) {
+        console.log(`Push protection already ${currentState.toLowerCase()} for pattern: ${pattern.name}`);
+        return;
+    }
+    await pushProtectionToggle.click();
+    console.log(chalk.blue(`Toggling push protection for pattern: ${pattern.name} to ${enablePushProtectionFlag ? 'Enabled' : 'Disabled'}`));
+    const settingPopOver = await page.locator('div[role="none"][data-variant="anchored"]').first();
+    // wait for the popover to appear
+    await settingPopOver.waitFor({ state: 'visible' });
+    // if we're debugging, take a screenshot of the popover
+    if (config?.debug) {
+        const screenshotPath = path.join(process.cwd(), 'push_protection_popover.png');
+        await settingPopOver.screenshot({ path: screenshotPath });
+        console.log(chalk.blue(`📸 Push protection popover screenshot saved to: ${screenshotPath}`));
+        // and lastly, show the innerHTML of the element
+        const innerHTML = await settingPopOver.evaluate(el => el.innerHTML);
+        console.log(chalk.gray(`Inner HTML of push protection popover:\n${innerHTML}`));
+    }
+    if (enablePushProtectionFlag) {
+        // press "e" to use the aria key shortcutd
+        await settingPopOver.press('e');
+        await settingPopOver.press('Enter');
+    }
+    else {
+        // press "d" to disable push protection
+        await settingPopOver.press('d');
+        await settingPopOver.press('Enter');
+    }
+    if (config?.debug) {
+        // also take a screenshot of the page
+        const pageScreenshotPath = path.join(process.cwd(), 'push_protection_page.png');
+        await page.screenshot({ path: pageScreenshotPath });
+        console.log(chalk.blue(`📸 Page screenshot saved to: ${pageScreenshotPath}`));
+    }
+    // wait for the Apply changes button to be enabled, and click it
+    const applyChangesButton = page.locator('button:text-is("Apply changes")').first();
+    await applyChangesButton.click();
 }
 async function displayDryRunResults(results) {
     if (results.count === 0) {
