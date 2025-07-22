@@ -55,6 +55,8 @@ interface Config {
     patterns?: string[];
     dryRunThreshold?: number;
     enablePushProtection?: boolean;
+    noChangePushProtection?: boolean;
+    disablePushProtection?: boolean;
     headless?: boolean;
     downloadExisting?: boolean;
     validate?: boolean;
@@ -68,7 +70,12 @@ let state: any = null;
 
 export async function main() {
     const config = parseArgs();
-    
+
+    if (!config) {
+        console.error(chalk.red('✖ Invalid configuration. Please check your command line arguments.'));
+        process.exit(1);
+    }
+
     console.log(chalk.bold.blue(`🔐 Secret Scanning Custom Pattern Automation Tool`));
     console.log(chalk.gray(`Using server: ${config.server}`));
     console.log(chalk.gray(`Target: ${config.target}`));
@@ -126,7 +133,7 @@ export async function main() {
     }
 }
 
-function parseArgs(): Config {
+function parseArgs(): Config|undefined {
     const args = minimist(process.argv.slice(2));
 
     const target: string | undefined = args._.pop();
@@ -167,13 +174,15 @@ function parseArgs(): Config {
         process.exit(1);
     }
 
-    return {
+    const config = {
         server: args.server ?? 'https://github.com',
         target,
         scope,
         patterns: args.pattern ? (Array.isArray(args.pattern) ? args.pattern : [args.pattern]) : undefined,
         dryRunThreshold: args['dry-run-threshold'] ? parseInt(args['dry-run-threshold'], 10) : 50,
         enablePushProtection: args['enable-push-protection'] ?? false,
+        noChangePushProtection: args['no-change-push-protection'] ?? false,
+        disablePushProtection: args['disable-push-protection'] ?? false,
         headless: args.headless ?? true,
         downloadExisting: args['download-existing'] ?? false,
         validateOnly: args['validate-only'] ?? false,
@@ -182,6 +191,27 @@ function parseArgs(): Config {
         dryRunAllRepos: args['dry-run-all-repos'] ?? false,
         dryRunRepoList: args['dry-run-repo-list'] ? (Array.isArray(args['dry-run-repo-list']) ? args['dry-run-repo-list'] : [args['dry-run-repo-list']]) : [],
     };
+
+    if (!config.patterns || config.patterns.length === 0) {
+        console.warn(chalk.yellow('ℹ️ No patterns specified for upload. You can use --pattern to specify one or more pattern files.'));
+    }
+
+    if (config.enablePushProtection && config.noChangePushProtection) {
+        console.warn(chalk.yellow('⚠️ Both --enable-push-protection and --no-change-push-protection are set. Choose one of them only.'));
+        return undefined;
+    }
+
+    if (config.enablePushProtection && config.disablePushProtection) {
+        console.warn(chalk.yellow('⚠️ Both --enable-push-protection and --disable-push-protection are set. Choose one of them only.'));
+        return undefined;
+    }
+
+    if (config.disablePushProtection && config.noChangePushProtection) {
+        console.warn(chalk.yellow('⚠️ Both --disable-push-protection and --no-change-push-protection are set. Choose one of them only.'));
+        return undefined;
+    }
+
+    return config;
 }
 
 async function login(server: string) {
@@ -189,10 +219,10 @@ async function login(server: string) {
     const stateFilePath = path.join(process.cwd(), '.state');
     try {
         state = JSON.parse(await fs.readFile(stateFilePath, 'utf-8'));
-        console.log('Using existing authentication state from .state file');
+        console.log(chalk.gray('🔑 Using existing authentication from .state file'));
         return;
     } catch (error) {
-        console.warn('No existing authentication state found, proceeding with manual login');
+        console.log(chalk.blue('🔑 No existing authentication found, doing browser login'));
     }
 
     const browser = await chromium.launch({ headless: false });
@@ -201,9 +231,9 @@ async function login(server: string) {
 
     // Wait for user to log in
     await page.goto(`${server}/login`);
-    console.log(`Please log in manually to GitHub on ${server}`);
-    
-    console.log('Waiting for manual login... Press Enter once logged in.');
+    console.log(chalk.blue(`🖥️ Please log in manually to GitHub on ${server}`));
+
+    console.log(chalk.blue('⌨ Waiting for manual login... Press Enter once logged in'));
     // Wait for user input
     await new Promise<void>((resolve) => {
         process.stdin.once('data', () => resolve());
@@ -214,7 +244,7 @@ async function login(server: string) {
 
     await fs.writeFile(stateFilePath, JSON.stringify(state, null, 2));
 
-    console.log('Login successful, state saved.');
+    console.log(chalk.green('✓ Login successful, state saved'));
     await browser.close();
 }
 
@@ -351,19 +381,25 @@ async function downloadExistingPatterns(context: BrowserContext, config: Config)
                         additionalMatchRules.get(matchType)?.push(additionalSecretFormat);
                     }
 
-                    // reprocess additional matches so we can serialize as JSON - so in a plain JS object, not a Map
-                    const additionalMatchesObject = Object.fromEntries(additionalMatchRules.entries());
+                    // Convert to the Pattern interface format
+                    const pattern: Pattern = {
+                        name: name || `Pattern_${id}`,
+                        regex: {
+                            version: 1,
+                            pattern: secretFormat || '',
+                            ...(beforeSecret && { start: beforeSecret }),
+                            ...(afterSecret && { end: afterSecret }),
+                            ...(additionalMatchRules.get('must_match') && { additional_match: additionalMatchRules.get('must_match') }),
+                            ...(additionalMatchRules.get('must_not_match') && { additional_not_match: additionalMatchRules.get('must_not_match') })
+                        },
+                        comments: [
+                            `Downloaded from ${config.scope}: ${config.target} (${config.server})`,
+                            `Original ID: ${id}`,
+                            `Published: ${isPublished ? 'Yes' : 'No'}`
+                        ]
+                    };
 
-                    // TODO: record if push protection is enabled or not
-                    extractedPatterns.push({
-                        id: id,
-                        name: name,
-                        secret_format: secretFormat,
-                        before_secret: beforeSecret,
-                        after_secret: afterSecret,
-                        additional_matches: additionalMatchesObject,
-                        is_published: isPublished
-                    });
+                    extractedPatterns.push(pattern);
                 }
             }
 
@@ -381,10 +417,16 @@ async function downloadExistingPatterns(context: BrowserContext, config: Config)
 
         progressBar.stop();
         
+        // Create PatternFile structure matching the import format
+        const patternFile: PatternFile = {
+            name: `Downloaded patterns from ${config.target}`,
+            patterns: extractedPatterns
+        };
+        
         // Save patterns to file
         const outputPath = path.join(process.cwd(), 'existing-patterns.yml');
-        await fs.writeFile(outputPath, yaml.dump(extractedPatterns));
-        console.log(chalk.blue(`⬇️ Saved to: ${outputPath}`));
+        await fs.writeFile(outputPath, yaml.dump(patternFile));
+        console.log(chalk.blue(`⬇️  Saved to: ${outputPath}`));
 
     } finally {
         await page.close();
@@ -729,11 +771,18 @@ async function processPattern(context: BrowserContext, config: Config, pattern: 
             await publishPattern(page);
         }
 
+        if (config.noChangePushProtection) {
+            return;
+        }
+
         // Enable push protection if requested in the pattern config, or if confirmed by the user
         let enablePushProtectionFlag = config.enablePushProtection || pattern.push_protection;
+        if (config.disablePushProtection) {
+            enablePushProtectionFlag = false;
+        }
 
-        if (!enablePushProtectionFlag) {
-            // ask the user
+        if (!enablePushProtectionFlag && !config.disablePushProtection && pattern.push_protection === undefined) {
+            // ask the user, if there is no instruction to disable push protection at the args or in the pattern
             const { enablePushProtection } = await inquirer.prompt({
                 name: 'enablePushProtection',
                 type: 'confirm',
