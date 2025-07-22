@@ -6,6 +6,7 @@ import * as path from 'path';
 import chalk from 'chalk';
 import Table from 'cli-table3';
 import inquirer from 'inquirer';
+import cliProgress from 'cli-progress';
 import { PatternValidator } from './validator.js';
 let state = null;
 export async function main() {
@@ -157,6 +158,9 @@ async function downloadExistingPatterns(context, config) {
         const extractedPatterns = [];
         let count = 0;
         let firstPage = true;
+        // progress bar
+        const progressBar = new cliProgress.MultiBar({}, cliProgress.Presets.shades_classic);
+        const progressBarSimple = progressBar.create(count, 0);
         while (keepGoing) {
             await page.waitForLoadState('load');
             const customPatternList = page.locator('.js-custom-pattern-list').first();
@@ -179,11 +183,13 @@ async function downloadExistingPatterns(context, config) {
             if (firstPage) {
                 firstPage = false;
                 count = parseInt(customPatternCount.match(/\d+/)?.[0] ?? '0', 10);
-                console.log(`Found ${count} existing patterns`);
+                progressBarSimple.setTotal(count);
+                progressBarSimple.update(0);
             }
             const patternRows = await customPatternList.locator('li[class="Box-row"]').all();
             if (!patternRows || patternRows.length === 0) {
-                console.warn('No existing patterns found');
+                console.warn(chalk.yellow('No existing patterns found'));
+                progressBar.stop();
                 return;
             }
             for (const row of patternRows) {
@@ -191,8 +197,8 @@ async function downloadExistingPatterns(context, config) {
                 if (link) {
                     const name = await link.textContent();
                     const url = await link.getAttribute('href');
-                    const id = url?.split('/').pop() || '';
-                    console.log(`Getting: ${name} (ID: ${id})`);
+                    const id = url?.split('/').pop()?.split('?')[0] || '';
+                    progressBarSimple.increment();
                     // now get the content of the URL, by loading it and extracting it from the page
                     const patternPage = await context.newPage();
                     const result = await patternPage.goto(`${config.server}${url}`);
@@ -262,7 +268,7 @@ async function downloadExistingPatterns(context, config) {
                 keepGoing = false;
             }
         }
-        console.log(`Got ${extractedPatterns.length} existing patterns`);
+        progressBar.stop();
         // Save patterns to file
         const outputPath = path.join(process.cwd(), 'existing-patterns.yml');
         await fs.writeFile(outputPath, yaml.dump(extractedPatterns));
@@ -781,9 +787,8 @@ async function performDryRun(page, pattern, config) {
             };
         }
     }
-    // Extract pattern ID from the URL for tracking
-    const urlParts = page.url().split('/');
-    const patternId = urlParts[urlParts.length - 1];
+    // Extract pattern ID from the URL for tracking - split at / and pick final entry, then split at ? and pick first part
+    const patternId = page.url().split('/').pop()?.split('?', 2)[0];
     console.log(chalk.blue(`Pattern ID: ${patternId}`));
     if (!patternId || patternId.length === 0 || patternId === 'new') {
         console.error(chalk.red('❌ Failed to retrieve pattern ID from the URL'));

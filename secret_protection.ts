@@ -6,8 +6,8 @@ import * as path from 'path';
 import chalk from 'chalk';
 import Table from 'cli-table3';
 import inquirer from 'inquirer';
+import cliProgress from 'cli-progress';
 import { PatternValidator } from './validator.js';
-import { config } from 'process';
 
 export interface Pattern {
     name: string;
@@ -239,6 +239,10 @@ async function downloadExistingPatterns(context: BrowserContext, config: Config)
         let count = 0;
         let firstPage = true;
 
+        // progress bar
+        const progressBar = new cliProgress.MultiBar({}, cliProgress.Presets.shades_classic);
+        const progressBarSimple = progressBar.create(count, 0);
+
         while(keepGoing) {
             await page.waitForLoadState('load');
 
@@ -269,13 +273,15 @@ async function downloadExistingPatterns(context: BrowserContext, config: Config)
             if (firstPage) {
                 firstPage = false;
                 count = parseInt(customPatternCount.match(/\d+/)?.[0] ?? '0', 10);
-                console.log(`Found ${count} existing patterns`);
+                progressBarSimple.setTotal(count);
+                progressBarSimple.update(0);
             }
 
             const patternRows = await customPatternList.locator('li[class="Box-row"]').all();
 
             if (!patternRows || patternRows.length === 0) {
-                console.warn('No existing patterns found');
+                console.warn(chalk.yellow('No existing patterns found'));
+                progressBar.stop();
                 return;
             }
 
@@ -285,9 +291,9 @@ async function downloadExistingPatterns(context: BrowserContext, config: Config)
                 if (link) {
                     const name = await link.textContent();
                     const url = await link.getAttribute('href');
-                    const id = url?.split('/').pop() || '';
+                    const id = url?.split('/').pop()?.split('?')[0] || '';
 
-                    console.log(`Getting: ${name} (ID: ${id})`);
+                    progressBarSimple.increment();
 
                     // now get the content of the URL, by loading it and extracting it from the page
                     const patternPage = await context.newPage();
@@ -374,7 +380,7 @@ async function downloadExistingPatterns(context: BrowserContext, config: Config)
             }
         }
 
-        console.log(`Got ${extractedPatterns.length} existing patterns`);
+        progressBar.stop();
         
         // Save patterns to file
         const outputPath = path.join(process.cwd(), 'existing-patterns.yml');
