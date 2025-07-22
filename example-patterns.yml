@@ -6,7 +6,7 @@ patterns:
     regex:
       version: 0.1
       pattern: |
-        [a-zA-Z0-9]{32,64}
+        [a-zA-Z0-9+/_-]{32,64}={0,2}
       start: |
         (?i)(?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token)[_\s]*[=:]\s*['"]*
       end: |
@@ -24,40 +24,10 @@ patterns:
       - "Includes common variable names for API keys"
       - "Excludes common test/placeholder values"
 
-  - name: JWT Token
-    type: jwt_token
+  - name: Test123
     regex:
-      version: 0.1
-      pattern: |
-        eyJ[a-zA-Z0-9+/=]+\.eyJ[a-zA-Z0-9+/=]+\.[a-zA-Z0-9+/=_-]+
-      start: |
-        (?i)(?:jwt|token|bearer)[_\s]*[=:]\s*['"]*
-      end: |
-        ['"]*(?:\s|$|[,\]}])
-    test:
-      data: 'jwt_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"'
-      start_offset: 13
-      end_offset: -2
-    comments:
-      - "Matches JSON Web Tokens (JWT)"
-      - "Standard JWT format with three base64-encoded sections"
+      pattern: test[0-9]{1,2}
+      start: \A|[^0-9A-Za-z]
+      end: \z|[^0-9A-Za-z]
+      additional_match: {}
 
-  - name: Database Connection String
-    type: database_connection
-    regex:
-      version: 0.1
-      pattern: |
-        [a-zA-Z0-9+/=_.-]{20,}
-      start: |
-        (?i)(?:database[_-]?url|connection[_-]?string|db[_-]?url)[_\s]*[=:]\s*['"]*(?:mongodb|mysql|postgresql|postgres)://[^:]+:[^@]+@
-      end: |
-        ['"]*(?:\s|$|[,\]}])
-      additional_match:
-        - "[@:/]"
-    test:
-      data: 'DATABASE_URL = "postgresql://user:secretpassword123@localhost:5432/mydb"'
-      start_offset: 32
-      end_offset: 48
-    comments:
-      - "Matches database connection strings with embedded credentials"
-      - "Supports MongoDB, MySQL, and PostgreSQL formats"
