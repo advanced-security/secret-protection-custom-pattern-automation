@@ -18,7 +18,7 @@ export async function main() {
     // Handle validation-only mode
     if (config.validateOnly) {
         if (!config.patterns || config.patterns.length === 0) {
-            console.error(chalk.red('❌ No pattern files specified for validation'));
+            console.error(chalk.red('✖ No pattern files specified for validation'));
             process.exit(1);
         }
         console.log(chalk.yellow('🔍 Running validation-only mode (no upload)'));
@@ -29,22 +29,22 @@ export async function main() {
                 validatePatterns(patternFile);
             }
             catch (error) {
-                console.error(chalk.red(`❌ Validation failed for ${patternPath}:`), error);
+                console.error(chalk.red(`✖ Validation failed for ${patternPath}:`), error);
                 process.exit(1);
             }
         }
-        console.log(chalk.green('\n✅ All pattern files passed validation!'));
+        console.log(chalk.green('\n✓ All pattern files passed validation'));
         process.exit(0);
     }
     try {
         await login(config.server);
     }
     catch (error) {
-        console.error(chalk.red('❌ Login failed:'), error);
+        console.error(chalk.red('✖ Login failed:'), error);
         process.exit(1);
     }
     if (state === null) {
-        console.error(chalk.red('❌ Authentication error.'));
+        console.error(chalk.red('✖ Authentication error.'));
         process.exit(1);
     }
     const browser = await chromium.launch({ headless: config.headless });
@@ -78,7 +78,7 @@ function parseArgs() {
         };
     }
     if (!target) {
-        console.error(chalk.red('❌ Please provide a target repository, organization, or enterprise.'));
+        console.error(chalk.red('✖ Please provide a target repository, organization, or enterprise.'));
         process.exit(1);
     }
     // auto-detect scope based on target
@@ -95,7 +95,7 @@ function parseArgs() {
     // check scope is valid
     const validScopes = ['repo', 'org', 'enterprise'];
     if (!validScopes.includes(scope)) {
-        console.error(chalk.red(`❌ Invalid scope: ${scope}. Valid scopes are: ${validScopes.join(', ')}`));
+        console.error(chalk.red(`✖ Invalid scope: ${scope}. Valid scopes are: ${validScopes.join(', ')}`));
         process.exit(1);
     }
     return {
@@ -225,13 +225,13 @@ async function downloadExistingPatterns(context, config) {
                         }
                         const additionalSecretFormat = await match.locator('input[type="text"]').getAttribute('value');
                         if (!additionalSecretFormat) {
-                            console.warn('No additional secret format found, skipping this match');
+                            console.warn(chalk.yellow('⚠️ No additional secret format found, skipping this match'));
                             continue;
                         }
                         // Get the radio button with value='must_match'
                         const mustMatchRadio = match.locator('input[type="radio"][value="must_match"]');
                         if (!mustMatchRadio) {
-                            console.warn('No must match radio button found, skipping this match');
+                            console.warn(chalk.yellow('⚠️ No must match radio button found, skipping this match'));
                             continue;
                         }
                         const isMustMatch = await mustMatchRadio.isChecked();
@@ -271,7 +271,7 @@ async function downloadExistingPatterns(context, config) {
         // Save patterns to file
         const outputPath = path.join(process.cwd(), 'existing-patterns.yml');
         await fs.writeFile(outputPath, yaml.dump(extractedPatterns));
-        console.log(`Saved to: ${outputPath}`);
+        console.log(chalk.blue(`⬇️ Saved to: ${outputPath}`));
     }
     finally {
         await page.close();
@@ -296,7 +296,7 @@ async function uploadPatterns(context, config) {
         }
         catch (err) {
             const error = err;
-            console.error(`Failed to fully process pattern file ${patternPath}:`, error.message);
+            console.error(chalk.red(`✖ Failed to fully process pattern file ${patternPath}:`, error.message));
         }
     }
 }
@@ -315,10 +315,9 @@ async function loadPatternFile(filePath) {
     }
 }
 function validatePatterns(patternFile) {
-    console.log(chalk.bold(`\n🔍 Validating patterns in: ${patternFile.name}`));
     const fileResult = PatternValidator.validatePatternFile(patternFile);
     if (fileResult.isValid) {
-        console.log(chalk.green('✓ All patterns passed validation'));
+        console.log(chalk.green('✔ All patterns passed validation'));
     }
     else {
         PatternValidator.printValidationReport(fileResult);
@@ -333,7 +332,7 @@ function validatePatterns(patternFile) {
     const summaryTable = PatternValidator.createSummaryTable(patternResults);
     console.log('\n📊 Validation Summary:');
     console.log(summaryTable);
-    console.log(chalk.green('✅ Pattern validation completed successfully\n'));
+    console.log(chalk.green('✓ Pattern validation completed successfully\n'));
 }
 async function expandMoreOptions(page) {
     const optionsData = page.locator('div.Details-content--shown').first();
@@ -435,7 +434,7 @@ async function fillInPattern(page, pattern, isExisting = false, config) {
             console.log(chalk.gray(`Note: Could not clear all existing additional rules: ${error}`));
         }
         if (!changed) {
-            console.log(chalk.yellow(`No changes detected against existing pattern, skipping submission`));
+            console.log(chalk.yellow(`⏩ No changes detected against existing pattern, skipping submission`));
             return false;
         }
     }
@@ -469,7 +468,7 @@ async function fillInPattern(page, pattern, isExisting = false, config) {
             await addAdditionalRule(page, rule, 'must_not_match', index + offset);
         }
     }
-    console.log(chalk.green(`✅ Pattern information filled successfully`));
+    console.log(chalk.green(`✓ Pattern information filled successfully`));
     return true;
 }
 // TODO: cache the names we have already seen, so we don't have to keep checking - and store any newly created name/id pairs as we go, too
@@ -568,7 +567,7 @@ async function processPattern(context, config, pattern) {
             await publishPattern(page);
         }
         // Enable push protection if requested in the pattern config, or if confirmed by the user
-        let enablePushProtectionFlag = config.enablePushProtection;
+        let enablePushProtectionFlag = config.enablePushProtection || pattern.push_protection;
         if (!enablePushProtectionFlag) {
             // ask the user
             const { enablePushProtection } = await inquirer.prompt({
@@ -581,7 +580,7 @@ async function processPattern(context, config, pattern) {
         }
         if (config.scope === 'repo') {
             if (enablePushProtectionFlag) {
-                console.log(chalk.blue(`🛡️  Enabling push protection for pattern: ${pattern.name}`));
+                console.log(chalk.blue(`🛡️ Enabling push protection for pattern: ${pattern.name}`));
                 await enablePushProtection(page, pattern);
             }
             else {
@@ -595,10 +594,10 @@ async function processPattern(context, config, pattern) {
             }
         }
         const actionPast = existingPatternUrl ? 'updated' : 'created';
-        console.log(chalk.green(`✅ Successfully ${actionPast} pattern: ${pattern.name}`));
+        console.log(chalk.green(`✓ Successfully ${actionPast} pattern: ${pattern.name}`));
     }
     catch (error) {
-        console.error(chalk.red(`❌ Failed to process pattern "${pattern.name}":`, error));
+        console.error(chalk.red(`✖ Failed to process pattern "${pattern.name}":`, error));
         throw error;
     }
     finally {
@@ -631,10 +630,10 @@ async function testPattern(page, pattern) {
     }
     if (!ignoreTestResult) {
         if (testSuccess?.includes('No matches')) {
-            console.warn(chalk.red(`❌ Pattern test failed for: ${pattern.name}`));
+            console.warn(chalk.red(`✖ Pattern test failed for: ${pattern.name}`));
             throw new Error(`Pattern test failed for: ${pattern.name}`);
         }
-        console.log(chalk.green(`✅ Pattern test passed: ${pattern.name}`));
+        console.log(chalk.green(`✓ Pattern test passed: ${pattern.name}`));
     }
 }
 async function addAdditionalRule(page, rule, type, index) {
@@ -677,7 +676,7 @@ async function clickAndWaitForRedirect(page, button, config) {
     }
     catch (err) {
         const error = err;
-        console.error(chalk.red(`❌ Error during page navigation: ${error.message}`));
+        console.error(chalk.red(`✖ Error during page navigation: ${error.message}`));
         throw error;
     }
 }
@@ -771,7 +770,7 @@ async function performDryRun(page, pattern, config) {
         }
         else {
             // error, exit
-            console.error(chalk.red(`❌ Unexpected button ID: ${buttonID}`));
+            console.error(chalk.red(`✖ Unexpected button ID: ${buttonID}`));
             return {
                 id: '',
                 name: pattern.name,
@@ -785,7 +784,7 @@ async function performDryRun(page, pattern, config) {
     const patternId = page.url().split('/').pop()?.split('?', 2)[0];
     console.log(chalk.blue(`Pattern ID: ${patternId}`));
     if (!patternId || patternId.length === 0 || patternId === 'new') {
-        console.error(chalk.red('❌ Failed to retrieve pattern ID from the URL'));
+        console.error(chalk.red('✖ Failed to retrieve pattern ID from the URL'));
         throw new Error('Failed to retrieve pattern ID from the URL');
     }
     // Wait for dry run to complete with progress indicator
@@ -798,7 +797,7 @@ async function performDryRun(page, pattern, config) {
             const statusText = await statusElement.textContent();
             if (statusText === 'Completed') {
                 process.stdout.write('\n');
-                console.log(chalk.green('✅ Dry run completed successfully'));
+                console.log(chalk.green('✓ Dry run completed successfully'));
                 break;
             }
             else if (statusText === 'In progress' || statusText === 'Queued') {
@@ -806,7 +805,7 @@ async function performDryRun(page, pattern, config) {
             }
             else {
                 process.stdout.write('\n');
-                console.log(chalk.red(`❌ Dry run failed: ${statusText}`));
+                console.log(chalk.red(`✖ Dry run failed: ${statusText}`));
                 break;
             }
         }
@@ -846,7 +845,7 @@ async function getDryRunResults(page) {
         // Look for the dry run results container
         const resultsContainer = page.locator('#custom-pattern-form-frame').locator('form.ajax-pagination-form');
         if (!await resultsContainer.first().isVisible()) {
-            console.log(chalk.red('❌ No dry run results container found'));
+            console.log(chalk.red('✖ No dry run results container found'));
             return { count: 0, results: [] };
         }
         // get count from the results container. Find the heading "Total matches" in a span, then get the next sibling element, an h5
@@ -1008,7 +1007,7 @@ async function togglePushProtectionConfig(page, pattern, config, enablePushProte
 }
 async function displayDryRunResults(results) {
     if (results.count === 0) {
-        console.log(chalk.green('\n✅ No results found - clean dry run!'));
+        console.log(chalk.green('\n✓ No results found - clean dry run'));
         return;
     }
     console.log(chalk.yellow(`\n⚠️  Found ${results.count} potential matches:`));
@@ -1031,7 +1030,7 @@ async function displayDryRunResults(results) {
 }
 async function confirmPatternAction(pattern, dryRunResult, config) {
     if (config.dryRunThreshold && dryRunResult.hits > config.dryRunThreshold) {
-        console.log(chalk.red(`\n❌ Pattern "${pattern.name}" exceeds dry run threshold (${dryRunResult.hits} > ${config.dryRunThreshold})`));
+        console.log(chalk.red(`\n✖ Pattern "${pattern.name}" exceeds dry run threshold (${dryRunResult.hits} > ${config.dryRunThreshold})`));
         const answer = await inquirer.prompt([{
                 type: 'confirm',
                 name: 'proceed',
