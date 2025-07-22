@@ -579,13 +579,7 @@ async function processPattern(context, config, pattern) {
             enablePushProtectionFlag = enablePushProtection;
         }
         if (config.scope === 'repo') {
-            if (enablePushProtectionFlag) {
-                console.log(chalk.blue(`🛡️ Enabling push protection for pattern: ${pattern.name}`));
-                await enablePushProtection(page, pattern);
-            }
-            else {
-                await disablePushProtection(page, pattern);
-            }
+            await togglePushProtection(page, enablePushProtectionFlag);
         }
         else {
             if (enablePushProtectionFlag) {
@@ -909,42 +903,22 @@ async function publishPattern(page) {
     await page.click('button.js-custom-pattern-submit-button');
     // TODO: Check for success message
 }
-async function enablePushProtection(page, pattern) {
-    // Look for push protection toggle
-    const pushProtectionToggle = page.locator('button[name="push_protection_enabled"]');
-    if (await pushProtectionToggle.isVisible()) {
-        const label = await pushProtectionToggle.locator('span.Button-label').first();
-        const isNotEnabled = (await label.textContent())?.trim() == 'Enable';
-        if (isNotEnabled) {
-            await pushProtectionToggle.click();
-            await page.waitForLoadState('load');
-            console.log(`✓ Push protection enabled for pattern: ${pattern.name}`);
-        }
-        else {
-            console.log(`Push protection already enabled for pattern: ${pattern.name}`);
-        }
-    }
-    else {
-        console.warn(`Push protection toggle not found for pattern: ${pattern.name}`);
-    }
-}
-async function disablePushProtection(page, pattern) {
-    // Look for push protection toggle
+async function togglePushProtection(page, enable) {
     const pushProtectionToggle = page.locator('button[name="push_protection_enabled"]');
     if (await pushProtectionToggle.isVisible()) {
         const label = await pushProtectionToggle.locator('span.Button-label').first();
         const isEnabled = (await label.textContent())?.trim() == 'Disable';
-        if (isEnabled) {
+        if (!isEnabled && enable || isEnabled && !enable) {
             await pushProtectionToggle.click();
             await page.waitForLoadState('load');
-            console.log(`✓ Push protection disabled for pattern: ${pattern.name}`);
+            console.log(chalk.green(`✓ Push protection ${enable ? 'enabled' : 'disabled'}`));
         }
         else {
-            console.log(`Push protection already disabled for pattern: ${pattern.name}`);
+            console.log(chalk.green(`✓ Push protection already ${enable ? 'enabled' : 'disabled'}`));
         }
     }
     else {
-        console.warn(`Push protection toggle not found for pattern: ${pattern.name}`);
+        console.warn(chalk.yellow(`⚠️ Push protection toggle not found`));
     }
 }
 async function togglePushProtectionConfig(page, pattern, config, enablePushProtectionFlag) {
@@ -975,7 +949,7 @@ async function togglePushProtectionConfig(page, pattern, config, enablePushProte
     }
     // if we didn't find the pattern, exit
     if (!tableRow) {
-        console.warn(`Pattern "${pattern.name}" not found in push protection configuration`);
+        console.warn(chalk.yellow(`⚠️ Pattern "${pattern.name}" not found in push protection configuration`));
         return;
     }
     // find the push protection toggle in the row
@@ -983,11 +957,10 @@ async function togglePushProtectionConfig(page, pattern, config, enablePushProte
     // get the current state of the toggle
     const currentState = (await pushProtectionToggle.textContent())?.trim();
     if ((enablePushProtectionFlag && currentState === 'Enabled') || (!enablePushProtectionFlag && currentState === 'Disabled')) {
-        console.log(`Push protection already ${currentState.toLowerCase()} for pattern: ${pattern.name}`);
+        console.log(chalk.green(`✓ Push protection already ${currentState.toLowerCase()}`));
         return;
     }
     await pushProtectionToggle.click();
-    console.log(chalk.blue(`Toggling push protection for pattern: ${pattern.name} to ${enablePushProtectionFlag ? 'Enabled' : 'Disabled'}`));
     const settingPopOver = await page.locator('div[role="none"][data-variant="anchored"]').first();
     // wait for the popover to appear
     await settingPopOver.waitFor({ state: 'visible' });
@@ -1004,6 +977,7 @@ async function togglePushProtectionConfig(page, pattern, config, enablePushProte
     // wait for the Apply changes button to be enabled, and click it
     const applyChangesButton = page.locator('button[type="button"]:has-text("Apply changes")').first();
     await applyChangesButton.click();
+    console.log(chalk.green(`✓ Push protection ${enablePushProtectionFlag ? 'enabled' : 'disabled'}`));
 }
 async function displayDryRunResults(results) {
     if (results.count === 0) {
