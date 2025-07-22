@@ -29,5 +29,3 @@ patterns:
       pattern: test[0-9]{1,2}
       start: \A|[^0-9A-Za-z]
       end: \z|[^0-9A-Za-z]
-      additional_match: {}
-

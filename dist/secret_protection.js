@@ -327,19 +327,20 @@ function validatePatterns(patternFile) {
     console.log(chalk.green('✅ Pattern validation completed successfully\n'));
 }
 async function expandMoreOptions(page) {
+    const optionsData = page.locator('div.Details-content--shown').first();
+    if (await optionsData.isVisible()) {
+        console.log(chalk.gray('More options already expanded, skipping'));
+        return;
+    }
+    console.log(chalk.gray('Expanding more options'));
     const moreOptions = page.locator('div.js-more-options').first();
-    if (await moreOptions.isVisible()) {
-        const detailsButtons = await moreOptions.locator('button.js-details-target').all();
-        for (const detailsButton of detailsButtons) {
-            if (await detailsButton.isVisible()) {
-                const isExpanded = await detailsButton.getAttribute('aria-expanded');
-                if (isExpanded !== 'true') {
-                    console.log(chalk.blue(`Expanding more options section...`));
-                    await detailsButton.click();
-                    await page.waitForTimeout(500); // Wait for expansion animation
-                }
-            }
-        }
+    const moreOptionsButton = await moreOptions.locator('button.js-details-target:text-is("More options")').first();
+    const isExpanded = await moreOptionsButton.getAttribute('aria-expanded');
+    console.log(chalk.gray(`More options expanded state: ${isExpanded}`));
+    if (isExpanded !== 'true') {
+        await moreOptionsButton.click();
+        const beforeSecretInput = page.locator('input#before_secret');
+        await beforeSecretInput.waitFor({ state: 'visible' });
     }
 }
 function comparePatterns(patternA, patternB) {
@@ -451,13 +452,12 @@ async function fillInPattern(page, pattern, isExisting = false, config) {
         await afterSecretInput.click();
         await afterSecretInput.fill(pattern.regex.end);
     }
-    if (pattern.regex.additional_match) {
+    if (pattern.regex.additional_match && pattern.regex.additional_match.length > 0) {
         for (const [index, rule] of pattern.regex.additional_match.entries()) {
             await addAdditionalRule(page, rule, 'must_match', index);
         }
     }
-    if (pattern.regex.additional_not_match) {
-        console.log(chalk.blue(`Adding ${pattern.regex.additional_not_match.length} additional not-match rules...`));
+    if (pattern.regex.additional_not_match && pattern.regex.additional_not_match.length > 0) {
         for (const [index, rule] of pattern.regex.additional_not_match.entries()) {
             const offset = pattern.regex.additional_match?.length || 0;
             await addAdditionalRule(page, rule, 'must_not_match', index + offset);
@@ -465,6 +465,7 @@ async function fillInPattern(page, pattern, isExisting = false, config) {
     }
     console.log(chalk.green(`✅ Pattern information filled successfully`));
 }
+// TODO: cache the names we have already seen, so we don't have to keep checking - and store any newly created name/id pairs as we go, too
 async function findExistingPatternByName(context, config, patternName) {
     const page = await context.newPage();
     try {
@@ -523,6 +524,7 @@ async function findExistingPatternByName(context, config, patternName) {
         await page.close();
     }
 }
+// TODO: catch errors/warnings after each step and log them, or stop on error
 async function processPattern(context, config, pattern) {
     console.log(chalk.bold(`\n🔄 Processing pattern: ${pattern.name}`));
     const page = await context.newPage();
@@ -542,7 +544,6 @@ async function processPattern(context, config, pattern) {
         // Navigate to pattern page (new or existing)
         await page.goto(url);
         await page.waitForLoadState('load');
-        console.log(page.url());
         console.log(chalk.blue(`📝 Filling in pattern details for: ${pattern.name}`));
         await fillInPattern(page, pattern, !!existingPatternUrl, config);
         // Test the pattern
@@ -591,15 +592,21 @@ async function processPattern(context, config, pattern) {
     }
 }
 async function testPattern(page, pattern) {
+    const ignoreTestResult = pattern.test?.data === undefined || pattern.test.data.trim() === '';
     // Add test data
     if (!pattern.test?.data) {
         console.warn(chalk.yellow(`⚠️  No test data found for pattern: ${pattern.name}`));
-        return;
+        // test with a single space, so we can dry-run the pattern
+        pattern.test = {
+            data: ' '
+        };
     }
     await page.fill('div.CodeMirror-code', pattern.test.data);
     let waiting = true;
     let testSuccess = null;
     // Check for test results
+    // TODO: use a more robust way to check for test results, including the offsets of the result(s)
+    // this might require doing a specific request using secrets derived from the page
     while (waiting) {
         testSuccess = await page.locator('div.js-test-pattern-matches').textContent();
         if (!testSuccess?.match(/ match$/) && !testSuccess?.includes(' - No matches')) {
@@ -607,13 +614,14 @@ async function testPattern(page, pattern) {
         }
         ;
         waiting = false;
+    }
+    if (!ignoreTestResult) {
         if (testSuccess?.includes('No matches')) {
             console.warn(chalk.red(`❌ Pattern test failed for: ${pattern.name}`));
             throw new Error(`Pattern test failed for: ${pattern.name}`);
         }
+        console.log(chalk.green(`✅ Pattern test passed: ${pattern.name}`));
     }
-    console.log(chalk.green(`✅ Pattern test passed: ${pattern.name}`));
-    console.log(chalk.blue(`${testSuccess}`));
 }
 async function addAdditionalRule(page, rule, type, index) {
     // Click add button to create new additional rule
@@ -628,25 +636,27 @@ async function addAdditionalRule(page, rule, type, index) {
     // Small delay to ensure the change is registered
     await page.waitForTimeout(200);
 }
-async function performDryRun(page, pattern, config) {
-    console.log(chalk.yellow(`🧪 Starting dry run for pattern: ${pattern.name}`));
-    // Wait for the dry run button to be enabled
-    const dryRunButton = page.locator('button.js-save-and-dry-run-button');
-    await dryRunButton.waitFor({ state: 'visible' });
-    while (!await dryRunButton.isEnabled()) {
-        console.log(chalk.gray('Waiting for dry run button to be enabled...'));
-        await page.waitForTimeout(1000);
-    }
-    // Click the dry run button and wait for navigation
+async function clickAndWaitForRedirect(page, button, config) {
+    // Click the button and wait for navigation
     const [response] = await Promise.all([
-        page.waitForResponse(response => response.url().includes('custom_patterns') && response.status() < 400),
-        dryRunButton.click()
+        page.waitForResponse(response => response.url().includes('custom_patterns') && response.status() >= 300 && response.status() < 400),
+        button.click()
     ]);
     try {
         // Check if the response indicates a redirect
         if (response.status() >= 300 && response.status() < 400) {
             const redirectUrl = response.headers()['location'];
             await page.goto(redirectUrl);
+        }
+        else {
+            console.warn(chalk.yellow(`⚠️ Button click did not result in a redirect. Status: ${response.status()}`));
+            console.log(response.status());
+            // if we're debugging, take a screenshot
+            if (config?.debug) {
+                const screenshotPath = path.join(process.cwd(), 'button_click_screenshot.png');
+                await page.screenshot({ path: screenshotPath });
+                console.log(chalk.blue(`📸 Screenshot saved to: ${screenshotPath}`));
+            }
         }
         // Wait for the page to fully load after redirect
         await page.waitForLoadState('load');
@@ -655,6 +665,54 @@ async function performDryRun(page, pattern, config) {
         const error = err;
         console.error(chalk.red(`❌ Error during page navigation: ${error.message}`));
         throw error;
+    }
+}
+async function performDryRun(page, pattern, config) {
+    console.log(chalk.yellow(`🧪 Starting dry run for pattern: ${pattern.name}`));
+    // Wait for the dry run button to be enabled
+    // the class differs at repo and org level - at org level it is js-repo-selector-dialog-summary-button
+    const dryRunButton = page.locator('button.js-save-and-dry-run-button, button.js-repo-selector-dialog-summary-button').first();
+    await dryRunButton.waitFor({ state: 'visible' });
+    const buttonID = await dryRunButton.getAttribute('id');
+    while (!await dryRunButton.isEnabled()) {
+        await page.waitForTimeout(100);
+    }
+    // if there's no button ID, we are at repo level. We can just click the button and start the dry-run
+    if (!buttonID) {
+        await clickAndWaitForRedirect(page, dryRunButton, config);
+    }
+    else {
+        // if we are at org level, we need to handle a repo selector dialog. Do we do all repos in the org, or select a few?
+        if (buttonID === 'dialog-show-repo-selector-dialog') {
+            // Emulate clicking the button to open the repo selector dialog
+            // Playwright struggles with this click, so we need to directly trigger the dialog
+            // we need to change the dialog state to 'open', using the dialog 'repo-selector-dialog'
+            const dialog = page.locator('dialog#repo-selector-dialog');
+            dialog.evaluate((el) => {
+                if (!el.open) {
+                    el.showModal();
+                }
+            });
+            // Wait for the dialog to appear
+            await dialog.waitFor({ state: 'visible' });
+            // Select all repositories, for now, and implement picking 'dry_run_repo_selection_selected_repos' later
+            const repoCheckboxes = dialog.locator('input[type="radio"][id="dry_run_repo_selection_all_repos"]');
+            await repoCheckboxes.check();
+            // Click the confirm button
+            const confirmButton = dialog.locator('button.js-org-repo-selector-dialog-dry-run-button');
+            await clickAndWaitForRedirect(page, confirmButton, config);
+        }
+        else {
+            // error, exit
+            console.error(chalk.red(`❌ Unexpected button ID: ${buttonID}`));
+            return {
+                id: '',
+                name: pattern.name,
+                hits: 0,
+                results: [],
+                completed: false
+            };
+        }
     }
     // Extract pattern ID from the URL for tracking
     const urlParts = page.url().split('/');
@@ -672,12 +730,11 @@ async function performDryRun(page, pattern, config) {
             // Check the dry-run status - a span with class f6, and the text "Status" is the header, and the next sibling is the status
             const statusElement = page.locator('span.f6:has-text("Status") + h5');
             const statusText = await statusElement.textContent();
-            console.log(chalk.blue(`Dry run status: ${statusText}`));
             if (statusText === 'Completed') {
                 console.log(chalk.green('✅ Dry run completed successfully'));
                 break;
             }
-            else if (statusText === 'In Progress' || statusText === 'Queued') {
+            else if (statusText === 'In progress' || statusText === 'Queued') {
                 process.stdout.write('.');
             }
             else {
@@ -725,7 +782,6 @@ async function getDryRunResults(page) {
         // get count from the results container. Find the heading "Total matches" in a span, then get the next sibling element, an h5
         const countElement = resultsContainer.locator('span.f6:has-text("Total matches") + h5');
         const countText = await countElement.textContent();
-        console.debug(chalk.blue(`Count text: ${countText}`));
         count = parseInt(countText ?? '0', 10);
         console.log(chalk.blue(`Found hit count: ${count}`));
         // If we didn't find a count, exit
@@ -851,7 +907,10 @@ async function confirmPatternAction(pattern, dryRunResult, config) {
                 message: 'Do you want to proceed anyway?',
                 default: false
             }]);
-        return answer.proceed;
+        if (!answer.proceed) {
+            console.log(chalk.yellow(`⏭️  Skipping pattern "${pattern.name}" due to dry run threshold`));
+            return false;
+        }
     }
     if (dryRunResult.hits === 0) {
         console.log(chalk.green(`✅ Pattern "${pattern.name}" has no matches - proceeding automatically`));

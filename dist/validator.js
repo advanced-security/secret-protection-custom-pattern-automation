@@ -84,6 +84,33 @@ export class PatternValidator {
         if (pattern.regex?.version === undefined) {
             result.warnings.push("Pattern version is not specified");
         }
+        if (pattern.regex?.start && !pattern.regex.start.trim()) {
+            result.warnings.push("Pattern start regex is empty");
+        }
+        if (pattern.regex?.end && !pattern.regex.end.trim()) {
+            result.warnings.push("Pattern end regex is empty");
+        }
+        // check that additional_match and additional_not_match are arrays
+        if (pattern.regex?.additional_match && !Array.isArray(pattern.regex.additional_match)) {
+            result.errors.push("Pattern additional_match must be an array");
+        }
+        else if (pattern.regex?.additional_match) {
+            for (const rule of pattern.regex.additional_match) {
+                if (typeof rule !== 'string' || !rule.trim()) {
+                    result.errors.push("Each additional_match rule must be a non-empty string");
+                }
+            }
+        }
+        if (pattern.regex?.additional_not_match && !Array.isArray(pattern.regex.additional_not_match)) {
+            result.errors.push("Pattern additional_not_match must be an array");
+        }
+        else if (pattern.regex?.additional_not_match) {
+            for (const rule of pattern.regex.additional_not_match) {
+                if (typeof rule !== 'string' || !rule.trim()) {
+                    result.errors.push("Each additional_not_match rule must be a non-empty string");
+                }
+            }
+        }
     }
     static printValidationReport(result, patternName) {
         const title = patternName ? `Validation Report for "${patternName}"` : 'Validation Report';
