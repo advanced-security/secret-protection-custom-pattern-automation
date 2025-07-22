@@ -120,8 +120,6 @@ export async function main() {
         if (config.patterns && config.patterns.length > 0) {
             await uploadPatterns(context, config);
         }
-        
-        console.log(chalk.green('\n🎉 All operations completed successfully!'));
     } finally {
         browser.close();
     }
@@ -462,14 +460,11 @@ function validatePatterns(patternFile: PatternFile): void {
 async function expandMoreOptions(page: Page): Promise<void> {
     const optionsData = page.locator('div.Details-content--shown').first();
     if (await optionsData.isVisible()) {
-        console.log(chalk.gray('More options already expanded, skipping'));
         return;
     }
-    console.log(chalk.gray('Expanding more options'));
     const moreOptions = page.locator('div.js-more-options').first();
     const moreOptionsButton = await moreOptions.locator('button.js-details-target:text-is("More options")').first();
     const isExpanded = await moreOptionsButton.getAttribute('aria-expanded');
-    console.log(chalk.gray(`More options expanded state: ${isExpanded}`));
     if (isExpanded !== 'true') {
         await moreOptionsButton.click();
         const beforeSecretInput = page.locator('input#before_secret');
@@ -481,7 +476,7 @@ function comparePatterns(patternA: string|undefined, patternB: string|undefined)
     return patternA?.trim() === patternB?.trim();
 }
 
-async function fillInPattern(page: Page, pattern: Pattern, isExisting: boolean = false, config: Config): Promise<void> {
+async function fillInPattern(page: Page, pattern: Pattern, isExisting: boolean = false, config: Config): Promise<boolean> {
     
     // If this is an existing pattern, clear the fields first, if they are different to what we are uploading
     if (isExisting) {
@@ -574,8 +569,8 @@ async function fillInPattern(page: Page, pattern: Pattern, isExisting: boolean =
         }
 
         if (!changed) {
-            console.log(chalk.yellow(`No changes detected against existing pattern, skipping submission`));
-            return;
+            console.log(chalk.yellow(`⏩ No changes detected against existing pattern, skipping submission`));
+            return false;
         }
 
     } else {
@@ -616,6 +611,8 @@ async function fillInPattern(page: Page, pattern: Pattern, isExisting: boolean =
     }
     
     console.log(chalk.green(`✅ Pattern information filled successfully`));
+
+    return true;
 }
 
 // TODO: cache the names we have already seen, so we don't have to keep checking - and store any newly created name/id pairs as we go, too
@@ -698,15 +695,12 @@ async function processPattern(context: BrowserContext, config: Config, pattern: 
     
     try {
         // Look at existing patterns to see if one matches this pattern name
-        console.log(chalk.blue(`🔍 Checking for existing pattern with name: ${pattern.name}`));
         const existingPatternUrl = await findExistingPatternByName(context, config, pattern.name);
         
         let url: string;
         if (existingPatternUrl) {
-            console.log(chalk.yellow(`📝 Found existing pattern, editing instead of creating new`));
             url = `${config.server}${existingPatternUrl}`;
         } else {
-            console.log(chalk.blue(`➕ No existing pattern found, creating new pattern`));
             const url_path = config.scope !== 'enterprise' ? 'settings/security_analysis/custom_patterns/new' : 'settings/advanced_security/custom_patterns/new';
             url = buildUrl(config, url_path);
         }
@@ -715,29 +709,28 @@ async function processPattern(context: BrowserContext, config: Config, pattern: 
         await page.goto(url);
         await page.waitForLoadState('load');
 
-        console.log(chalk.blue(`📝 Filling in pattern details for: ${pattern.name}`));
-        await fillInPattern(page, pattern, !!existingPatternUrl, config);
+        const needToSubmit = await fillInPattern(page, pattern, !!existingPatternUrl, config);
 
-        // Test the pattern
-        console.log(chalk.blue(`🧪 Testing pattern: ${pattern.name}`));
-        await testPattern(page, pattern);
+        if (needToSubmit) {
+            // Test the pattern
+            await testPattern(page, pattern);
 
-        // Perform dry run
-        const dryRunResult = await performDryRun(page, pattern, config);
+            // Perform dry run
+            const dryRunResult = await performDryRun(page, pattern, config);
 
-        // Interactive confirmation based on results
-        const shouldProceed = await confirmPatternAction(pattern, dryRunResult, config);
-        
-        if (!shouldProceed) {
-            console.log(chalk.yellow(`⏭️  Skipped pattern: ${pattern.name}`));
-            return;
+            // Interactive confirmation based on results
+            const shouldProceed = await confirmPatternAction(pattern, dryRunResult, config);
+            
+            if (!shouldProceed) {
+                console.log(chalk.yellow(`⏭️  Skipped pattern: ${pattern.name}`));
+                return;
+            }
+
+            // Publish the pattern
+            const action = existingPatternUrl ? 'Updating' : 'Publishing';
+            console.log(chalk.green(`📤 ${action} pattern: ${pattern.name}`));
+            await publishPattern(page);
         }
-
-        // Publish the pattern
-        const action = existingPatternUrl ? 'Updating' : 'Publishing';
-        console.log(chalk.green(`📤 ${action} pattern: ${pattern.name}`));
-        await publishPattern(page);
-
 
         // Enable push protection if requested in the pattern config, or if confirmed by the user
         let enablePushProtectionFlag = config.enablePushProtection;
@@ -1057,7 +1050,7 @@ async function getDryRunResults(page: Page): Promise<{ count: number; results: a
         const resultsContainer = page.locator('#custom-pattern-form-frame').locator('form.ajax-pagination-form');
 
         if (!await resultsContainer.first().isVisible()) {
-            console.log(chalk.gray('No dry run results container found'));
+            console.log(chalk.red('❌ No dry run results container found'));
             return { count: 0, results: [] };
         }
 
@@ -1065,11 +1058,9 @@ async function getDryRunResults(page: Page): Promise<{ count: number; results: a
         const countElement = resultsContainer.locator('span.f6:has-text("Total matches") + h5');
         const countText = await countElement.textContent();
         count = parseInt(countText ?? '0', 10);
-        console.log(chalk.blue(`Found hit count: ${count}`));
 
         // If we didn't find a count, exit
         if (count === 0 || isNaN(count)) {
-            console.log(chalk.green('No dry run results found (clean scan)'));
             return { count: 0, results: [] };
         }
 
@@ -1263,7 +1254,7 @@ async function togglePushProtectionConfig(page: Page, pattern: Pattern, config: 
 
 async function displayDryRunResults(results: { count: number; results: any[] }): Promise<void> {
     if (results.count === 0) {
-        console.log(chalk.green('✓ No potential secrets found - clean dry run!'));
+        console.log(chalk.green('\n✅ No results found - clean dry run!'));
         return;
     }
 
@@ -1271,15 +1262,17 @@ async function displayDryRunResults(results: { count: number; results: any[] }):
 
     // Create a table to display results
     const table = new Table({
-        head: ['Repository location', 'Match Preview'],
+        head: ['#', 'Repository location', 'Match', 'URL'],
     });
 
     // Show all results
     const displayResults = results.results;
-    for (const result of displayResults) {
+    for (const [index, result] of displayResults.entries()) {
         table.push([
+            (index + 1).toString(),
             result.repository_location || 'N/A',
             result.match || 'N/A',
+            result.link || 'N/A'
         ]);
     }
 
@@ -1305,53 +1298,7 @@ async function confirmPatternAction(pattern: Pattern, dryRunResult: DryRunResult
         }
     }
 
-    if (dryRunResult.hits === 0) {
-        console.log(chalk.green(`✅ Pattern "${pattern.name}" has no matches - proceeding automatically`));
-        return true;
-    }
-
-    const answer = await inquirer.prompt([{
-        type: 'list',
-        name: 'action',
-        message: `Pattern "${pattern.name}" found ${dryRunResult.hits} matches. What would you like to do?`,
-        choices: [
-            { name: 'Proceed with publishing', value: 'publish' },
-            { name: 'Skip this pattern', value: 'skip' },
-            { name: 'View detailed results', value: 'view' }
-        ]
-    }]);
-
-    if (answer.action === 'view') {
-        await displayDetailedResults(dryRunResult);
-        // Ask again after viewing
-        return confirmPatternAction(pattern, dryRunResult, config);
-    }
-
-    return answer.action === 'publish';
-}
-
-async function displayDetailedResults(dryRunResult: DryRunResult): Promise<void> {
-    console.log(chalk.bold(`\n📋 Detailed Results for "${dryRunResult.name}":`));
-    
-    const table = new Table({
-        head: ['#', 'Repository location', 'Match', 'URL'],
-    });
-
-    for (const [index, result] of dryRunResult.results.entries()) {
-        if (index >= 50) { // Limit to 50 results for readability
-            console.log(chalk.gray(`... and ${dryRunResult.results.length - 50} more results`));
-            break;
-        }
-        
-        table.push([
-            (index + 1).toString(),
-            result.repository_location || 'N/A',
-            result.match || 'N/A',
-            result.link || 'N/A'
-        ]);
-    }
-
-    console.log(table.toString());
+    return true;
 }
 
 function buildUrl(config: Config, ...pathSegments: string[]): string {
