@@ -812,7 +812,9 @@ async function performDryRun(page, pattern, config) {
             }
         }
         catch (error) {
-            console.log(chalk.gray(`\nDebug: Attempt ${attempts + 1}, error checking status: ${error}`));
+            if (config.debug) {
+                console.log(chalk.gray(`\nDebug: Attempt ${attempts + 1}, error checking status: ${error}`));
+            }
             process.stdout.write('.');
         }
         await page.waitForTimeout(5000); // Wait 5 seconds
@@ -993,15 +995,6 @@ async function togglePushProtectionConfig(page, pattern, config, enablePushProte
     const settingPopOver = await page.locator('div[role="none"][data-variant="anchored"]').first();
     // wait for the popover to appear
     await settingPopOver.waitFor({ state: 'visible' });
-    // if we're debugging, take a screenshot of the popover
-    if (config?.debug) {
-        const screenshotPath = path.join(process.cwd(), 'push_protection_popover.png');
-        await settingPopOver.screenshot({ path: screenshotPath });
-        console.log(chalk.blue(`📸 Push protection popover screenshot saved to: ${screenshotPath}`));
-        // and lastly, show the innerHTML of the element
-        const innerHTML = await settingPopOver.evaluate(el => el.innerHTML);
-        console.log(chalk.gray(`Inner HTML of push protection popover:\n${innerHTML}`));
-    }
     if (enablePushProtectionFlag) {
         // press "e" to use the aria key shortcutd
         await settingPopOver.press('e');

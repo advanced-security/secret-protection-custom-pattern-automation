@@ -830,7 +830,7 @@ async function addAdditionalRule(page: Page, rule: string, type: 'must_match' | 
     await page.waitForTimeout(200);
 }
 
-async function clickAndWaitForRedirect(page: Page, button: Locator, config?: Config): Promise<void> {
+async function clickAndWaitForRedirect(page: Page, button: Locator, config: Config): Promise<void> {
     // Click the button and wait for navigation
     const [response] = await Promise.all([
         page.waitForResponse(response => response.url().includes('custom_patterns') && response.status() >= 300 &&response.status() < 400),
@@ -863,7 +863,7 @@ async function clickAndWaitForRedirect(page: Page, button: Locator, config?: Con
     }
 }
 
-async function performDryRun(page: Page, pattern: Pattern, config?: Config): Promise<DryRunResult> {
+async function performDryRun(page: Page, pattern: Pattern, config: Config): Promise<DryRunResult> {
     console.log(chalk.yellow(`🧪 Starting dry run for pattern: ${pattern.name}`));
     
     // Wait for the dry run button to be enabled
@@ -974,9 +974,8 @@ async function performDryRun(page: Page, pattern: Pattern, config?: Config): Pro
         }
     }
 
-    // Extract pattern ID from the URL for tracking
-    const urlParts = page.url().split('/');
-    const patternId = urlParts[urlParts.length - 1];
+    // Extract pattern ID from the URL for tracking - split at / and pick final entry, then split at ? and pick first part
+    const patternId = page.url().split('/').pop()?.split('?', 2)[0];
     console.log(chalk.blue(`Pattern ID: ${patternId}`));
 
     if (!patternId || patternId.length === 0 || patternId === 'new') {
@@ -1007,7 +1006,9 @@ async function performDryRun(page: Page, pattern: Pattern, config?: Config): Pro
                 break;
             }
         } catch (error) {
-            console.log(chalk.gray(`\nDebug: Attempt ${attempts + 1}, error checking status: ${error}`));
+            if (config.debug) {
+                console.log(chalk.gray(`\nDebug: Attempt ${attempts + 1}, error checking status: ${error}`));
+            }
             process.stdout.write('.');
         }
         
@@ -1238,17 +1239,6 @@ async function togglePushProtectionConfig(page: Page, pattern: Pattern, config: 
 
     // wait for the popover to appear
     await settingPopOver.waitFor({ state: 'visible' });
-
-    // if we're debugging, take a screenshot of the popover
-    if (config?.debug) {
-        const screenshotPath = path.join(process.cwd(), 'push_protection_popover.png');
-        await settingPopOver.screenshot({ path: screenshotPath });
-        console.log(chalk.blue(`📸 Push protection popover screenshot saved to: ${screenshotPath}`));
-
-        // and lastly, show the innerHTML of the element
-        const innerHTML = await settingPopOver.evaluate(el => el.innerHTML);
-        console.log(chalk.gray(`Inner HTML of push protection popover:\n${innerHTML}`));
-    }
 
     if (enablePushProtectionFlag) {
         // press "e" to use the aria key shortcutd
