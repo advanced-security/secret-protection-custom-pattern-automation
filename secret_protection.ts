@@ -848,7 +848,7 @@ async function clickAndWaitForRedirect(page: Page, button: Locator, config?: Con
 
             // if we're debugging, take a screenshot
             if (config?.debug) {
-                const screenshotPath = path.join(process.cwd(), 'button_click_screenshot.png');
+                const screenshotPath = path.join(process.cwd(), `debug-button_click_not_redirected_screenshot_${Date.now()}.png`);
                 await page.screenshot({ path: screenshotPath });
                 console.log(chalk.blue(`📸 Screenshot saved to: ${screenshotPath}`));
             }
@@ -901,9 +901,21 @@ async function performDryRun(page: Page, pattern: Pattern, config?: Config): Pro
                 const repoCheckboxes = dialog.locator('input[type="radio"][id="dry_run_repo_selection_all_repos"]');
                 await repoCheckboxes.check();
             } else if (config?.dryRunRepoList && (config.scope === 'org' || config.scope === 'enterprise')) {
+
+                // select the "Select specific repositories" option
+                if (config.scope === 'org') {
+                    const specificReposOption = dialog.locator('input[type="radio"][id="dry_run_repo_selection_selected_repos"]');
+                    await specificReposOption.check();
+                }
+                
                 // Select specific repositories
-                for (const repo of config.dryRunRepoList) {
+                for (let repo of config.dryRunRepoList) {
                     console.log(chalk.blue(`Selecting repository for dry run: ${repo}`));
+
+                    // if it has a `/` in it, we assume it's a full repository name like `org/repo`, and at the org level, split off just the repo name
+                    if (config.scope === 'org' && repo.includes('/')) {
+                        repo = repo.split('/', 2)[1];
+                    }
 
                     // put them into the search field
                     const searchInput = dialog.locator('input#repo_id');
@@ -1248,17 +1260,9 @@ async function togglePushProtectionConfig(page: Page, pattern: Pattern, config: 
         await settingPopOver.press('Enter');
     }
 
-    if (config?.debug) {
-        // also take a screenshot of the page
-        const pageScreenshotPath = path.join(process.cwd(), 'push_protection_page.png');
-        await page.screenshot({ path: pageScreenshotPath });
-        console.log(chalk.blue(`📸 Page screenshot saved to: ${pageScreenshotPath}`));
-    }
-
     // wait for the Apply changes button to be enabled, and click it
-    const applyChangesButton = page.locator('button:text-is("Apply changes")').first();
+    const applyChangesButton = page.locator('button[type="button"]:has-text("Apply changes")').first();
     await applyChangesButton.click();
-
 }
 
 async function displayDryRunResults(results: { count: number; results: any[] }): Promise<void> {
