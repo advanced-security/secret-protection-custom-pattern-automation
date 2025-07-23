@@ -8,6 +8,7 @@ import Table from 'cli-table3';
 import inquirer from 'inquirer';
 import cliProgress from 'cli-progress';
 import { PatternValidator } from './validator.js';
+import { HELP_TEXT } from './cli.js';
 
 export interface Pattern {
     name: string;
@@ -73,6 +74,8 @@ export async function main() {
 
     if (!config) {
         console.error(chalk.red('✖ Invalid configuration. Please check your command line arguments.'));
+        // show HELP_TEXT from cli
+        console.log(HELP_TEXT);
         process.exit(1);
     }
 
@@ -192,8 +195,9 @@ function parseArgs(): Config|undefined {
         dryRunRepoList: args['dry-run-repo-list'] ? (Array.isArray(args['dry-run-repo-list']) ? args['dry-run-repo-list'] : [args['dry-run-repo-list']]) : [],
     };
 
-    if (!config.patterns || config.patterns.length === 0) {
-        console.warn(chalk.yellow('ℹ️ No patterns specified for upload. You can use --pattern to specify one or more pattern files.'));
+    if ((!config.patterns || config.patterns.length === 0) && !config.downloadExisting) {
+        console.warn(chalk.yellow('ℹ️  No patterns specified for upload. You can use --pattern to specify one or more pattern files.'));
+        return undefined;
     }
 
     if (config.enablePushProtection && config.noChangePushProtection) {

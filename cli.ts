@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // Help text
-const HELP_TEXT = `
+export const HELP_TEXT = `
 Secret Scanning Custom Pattern Automation Tool
 
 Usage: npm start -- [options] <target>
@@ -11,17 +11,21 @@ Arguments:
 
 Options:
   --server <url>        GitHub server URL (default: https://github.com)
-  --scope <scope>       Target scope: repo, org, enterprise (auto-detected from target)
+  --scope <scope>       Target scope: repo, org, enterprise (auto-detected for repos, and assumed to be org if not a repository)
   --pattern <file>      Pattern file(s) to upload (can be specified multiple times)
   --dry-run-threshold <n>  Maximum allowed dry-run results before skipping (default: 50)
   --enable-push-protection  Enable push protection for uploaded patterns
-  --download-existing   Download existing patterns to existing-patterns.json
+  --no-change-push-protection  Do not change push protection settings for patterns
+  --disable-push-protection  Disable push protection for uploaded patterns
+  --download-existing   Download existing patterns to existing-patterns.yml
   --validate-only      Validate patterns without uploading (no authentication required)
   --validate           Validate patterns before upload (default: true)
   --no-validate        Skip pattern validation
   --headless           Run in headless mode (default: true)
   --no-headless        Run with visible browser
   --debug              Enable debug mode with screenshots and verbose logging
+  --dry-run-all-repos  Run dry-run on all repositories in organization (org scope only)
+  --dry-run-repo-list <repo>  Specific repositories for dry-run (can be specified multiple times)
   --help               Show this help message
 
 Examples:
@@ -39,6 +43,12 @@ Examples:
 
   # Upload to GitHub Enterprise Server
   npm start -- --server https://github.example.com --pattern patterns.yml owner/repo
+
+  # Dry-run on all repositories in an organization
+  npm start -- --pattern patterns.yml --dry-run-all-repos myorg
+
+  # Dry-run on specific repositories only
+  npm start -- --pattern patterns.yml --dry-run-repo-list repo1 --dry-run-repo-list repo2 myorg
 `;
 
 // Check for help flag first, before importing main
