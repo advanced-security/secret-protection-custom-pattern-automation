@@ -1,8 +1,8 @@
 # Secret Protection Custom Pattern Automation
 
-A Playwright-based CLI tool that automates GitHub secret scanning custom pattern management through browser automation.
+A Playwright-based CLI tool that automates GitHub secret protection custom pattern management through browser automation.
 
-Provides a command-line interface for uploading, testing, and managing secret scanning patterns with automated dry runs and interactive confirmations.
+Provides a command-line interface for uploading, testing, and managing secret protection patterns with automated tests and dry runs.
 
 > [!NOTE]
 > This is an _unofficial_ tool created by Field Security Specialists, and is not officially supported by GitHub.
@@ -21,7 +21,7 @@ Provides a command-line interface for uploading, testing, and managing secret sc
 - **Pattern Validation**: Pattern structure validation
 - **Existing Pattern Download**: Export current patterns to YAML format for backup/review
 - **Pattern Updates**: Detect and update existing patterns when re-running with same pattern names
-- **Push Protection Management**: Configure push protection at repository and organization levels
+- **Push Protection Management**: Configure push protection at repository, organization and enterprise levels
 
 ## 📦 Installation
 
@@ -43,53 +43,53 @@ npm run build
 
 ```bash
 # Upload patterns to a repository
-npm start -- --pattern example-patterns.yml owner/repo
+npm start -- owner/repo --pattern example-patterns.yml
+
+# Download existing patterns to YAML format
+npm start -- owner/repo --download-existing
 
 # Upload multiple pattern files
-npm start -- --pattern generic.yml --pattern vendor.yml owner/repo
+npm start -- owner/repo --pattern generic.yml --pattern vendor.yml
 
 # Enable push protection for uploaded patterns
-npm start -- --pattern patterns.yml --enable-push-protection owner/repo
+npm start -- owner/repo --pattern patterns.yml --enable-push-protection
 ```
 
 ### Advanced Usage
 
 ```bash
 # Upload with custom dry-run threshold
-npm start -- --pattern patterns.yml --dry-run-threshold 100 owner/repo
+npm start -- owner/repo --pattern patterns.yml --dry-run-threshold 100
 
 # Run with visible browser (non-headless)
-npm start -- --pattern patterns.yml --no-headless owner/repo
-
-# Download existing patterns to YAML format
-npm start -- --download-existing owner/repo
+npm start -- owner/repo --pattern patterns.yml --no-headless
 
 # Validate patterns without uploading (no authentication required)
 npm start -- --pattern patterns.yml --validate-only
 
 # Work with organizations (auto-detected from target format)
-npm start -- --pattern patterns.yml myorg
+npm start -- myorg --pattern patterns.yml
 
 # Work with organizations explicitly
-npm start -- --pattern patterns.yml --scope org myorg
+npm start -- myorg --pattern patterns.yml --scope org
 
 # Work with GitHub Enterprise Server
-npm start -- --server https://github.example.com --pattern patterns.yml owner/repo
+npm start -- owner/repo --server https://github.example.com --pattern patterns.yml
 
 # Debug mode with visible browser and screenshots
-npm start -- --pattern patterns.yml --debug --no-headless owner/repo
+npm start -- owner/repo --pattern patterns.yml --debug --no-headless
 
 # Dry-run on all repositories in an organization
-npm start -- --pattern patterns.yml --dry-run-all-repos myorg
+npm start --  myorg --pattern patterns.yml --dry-run-all-repos
 
 # Dry-run on specific repositories only  
-npm start -- --pattern patterns.yml --dry-run-repo-list repo1 --dry-run-repo-list repo2 myorg
+npm start --  myorg --pattern patterns.yml --dry-run-repo-list repo1 --dry-run-repo-list repo2
 
 # Disable push protection for patterns
-npm start -- --pattern patterns.yml --disable-push-protection owner/repo
+npm start -- owner/repo --pattern patterns.yml --disable-push-protection 
 
 # Upload without changing existing push protection settings
-npm start -- --pattern patterns.yml --no-change-push-protection owner/repo
+npm start -- owner/repo --pattern patterns.yml --no-change-push-protection owner/repo
 ```
 
 ### Command Line Options
@@ -167,23 +167,21 @@ patterns:
 - `patterns[].regex.version`: Pattern version (defaults to 1)
 - `patterns[].regex.start`: Before-secret regex pattern
 - `patterns[].regex.end`: After-secret regex pattern  
-- `patterns[].regex.additional_match`: Array of must-match rules
-- `patterns[].regex.additional_not_match`: Array of must-not-match rules
+- `patterns[].regex.additional_match[]`: Array of must-match rules
+- `patterns[].regex.additional_not_match[]`: Array of must-not-match rules
 - `patterns[].test.data`: Test string for validation
 - `patterns[].test.start_offset`: Expected match start position
 - `patterns[].test.end_offset`: Expected match end position
 - `patterns[].push_protection`: Enable push protection for this pattern
-- `patterns[].comments`: Array of descriptive comments
+- `patterns[].comments[]`: Array of descriptive comments
 
 ## 🔍 Pattern Validation
 
-The tool includes comprehensive pattern validation:
+The tool includes basic pattern validation.
 
 ### Basic Validation
 
 - Required fields (name, regex pattern)
-- Valid regex syntax
-- Test data validation
 
 ### Validation Report Example
 
@@ -335,21 +333,24 @@ npm start -- --pattern patterns.yml owner/repo
 - **Incremental Deployment**: Start with repository-level testing before organization-wide rollout
 - **Authentication State**: Ensure that the `.state` file is secure and not shared
 
+See also [SECURITY.md](SECURITY.md) for security reporting guidelines.
+
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make changes with tests
-4. Submit a pull request
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to contribute to this project.
 
 ## 📄 License
 
-MIT License - see LICENSE file for details
+MIT License - see [LICENSE](LICENSE) file for details
 
 ## 🆘 Support
 
-- **Issues**: Report bugs and feature requests via GitHub Issues
-- **Documentation**: Check the inline help with `npm start -- --help`
-- **Examples**: See the `example-patterns.yml` file for pattern format reference
-- **Validation**: Use `--validate-only` to test pattern files without authentication
-- **Debug Mode**: Use `--debug --no-headless` for troubleshooting browser automation issues
+See [SUPPORT.md](SUPPORT.md) for support options.
+
+## 📜 Code of Conduct
+
+See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for our Code of Conduct.
+
+## 🛡️ Privacy
+
+See [PRIVACY.md](PRIVACY.md) for the privacy notice.
