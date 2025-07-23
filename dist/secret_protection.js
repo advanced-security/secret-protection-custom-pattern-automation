@@ -9,6 +9,7 @@ import inquirer from 'inquirer';
 import cliProgress from 'cli-progress';
 import { PatternValidator } from './validator.js';
 import { HELP_TEXT } from './cli.js';
+import { exit } from 'process';
 let state = null;
 export async function main() {
     const config = parseArgs();
@@ -322,6 +323,7 @@ async function uploadPatterns(context, config) {
         return;
     }
     console.log(`Uploading ${config.patterns.length} pattern file(s)...`);
+    const unprocessedPatterns = new Map();
     for (const patternPath of config.patterns) {
         try {
             console.log(`Processing pattern file: ${patternPath}`);
@@ -330,13 +332,37 @@ async function uploadPatterns(context, config) {
                 validatePatterns(patternFile);
             }
             for (const pattern of patternFile.patterns) {
-                await processPattern(context, config, pattern);
+                try {
+                    await processPattern(context, config, pattern);
+                }
+                catch (err) {
+                    const error = err;
+                    console.error(chalk.red(`✖ Failed to process pattern ${pattern.name ?? "**unnamed pattern**"} in file ${patternPath}:`, error.message));
+                    unprocessedPatterns.set(patternPath, unprocessedPatterns.get(patternPath) || []);
+                    unprocessedPatterns.get(patternPath)?.push([pattern?.name ?? "**unnamed pattern**", error.message]);
+                    if (err instanceof Error && err.message.includes('Target page, context or browser has been closed')) {
+                        console.error(chalk.red('⚠️  Browser context or page was closed unexpectedly.'));
+                        exit(1);
+                    }
+                }
             }
         }
         catch (err) {
             const error = err;
             console.error(chalk.red(`✖ Failed to fully process pattern file ${patternPath}:`, error.message));
         }
+    }
+    if (unprocessedPatterns.size > 0) {
+        console.log(chalk.yellow('\n⚠️ Some patterns could not be processed:'));
+        for (const [filePath, patterns] of unprocessedPatterns.entries()) {
+            console.log(chalk.yellow(`\nFile: ${filePath}`));
+            for (const [patternName, errorMessage] of patterns) {
+                console.log(chalk.red(`  Pattern: ${patternName} - Error: ${errorMessage}`));
+            }
+        }
+    }
+    else {
+        console.log(chalk.green('✓ All patterns processed successfully'));
     }
 }
 async function loadPatternFile(filePath) {
@@ -572,6 +598,13 @@ async function findExistingPatternByName(context, config, patternName) {
 // TODO: catch errors/warnings after each step and log them, or stop on error
 async function processPattern(context, config, pattern) {
     console.log(chalk.bold(`\n🔄 Processing pattern: ${pattern.name}`));
+    // fill in some defaults if parts are missing
+    if (pattern.regex.start === undefined) {
+        pattern.regex.start = '\\A|[^0-9A-Za-z]';
+    }
+    if (pattern.regex.end === undefined) {
+        pattern.regex.end = '\\z|[^0-9A-Za-z]';
+    }
     const page = await context.newPage();
     try {
         // Look at existing patterns to see if one matches this pattern name
@@ -579,6 +612,7 @@ async function processPattern(context, config, pattern) {
         let url;
         if (existingPatternUrl) {
             url = `${config.server}${existingPatternUrl}`;
+            console.log(chalk.blue(`🔍 Found existing pattern`));
         }
         else {
             const url_path = config.scope !== 'enterprise' ? 'settings/security_analysis/custom_patterns/new' : 'settings/advanced_security/custom_patterns/new';
@@ -590,19 +624,31 @@ async function processPattern(context, config, pattern) {
         const needToSubmit = await fillInPattern(page, pattern, !!existingPatternUrl, config);
         if (needToSubmit) {
             // Test the pattern
-            await testPattern(page, pattern);
+            const testResult = await testPattern(page, pattern, config);
+            if (!testResult) {
+                console.warn(chalk.red(`✖ Pattern test failed for ${pattern.name}, skipping upload`));
+                throw new Error(`Pattern test failed for ${pattern.name}`);
+            }
             // Perform dry run
             const dryRunResult = await performDryRun(page, pattern, config);
             // Interactive confirmation based on results
             const shouldProceed = await confirmPatternAction(pattern, dryRunResult, config);
             if (!shouldProceed) {
-                console.log(chalk.yellow(`⏭️  Skipped pattern: ${pattern.name}`));
+                console.log(chalk.yellow(`⏭️  Skipped pattern`));
                 return;
             }
             // Publish the pattern
-            const action = existingPatternUrl ? 'Updating' : 'Publishing';
-            console.log(chalk.green(`📤 ${action} pattern: ${pattern.name}`));
             await publishPattern(page);
+            const action = existingPatternUrl ? 'Updated' : 'Published';
+            console.log(chalk.green(`✓ ${action} pattern`));
+        }
+        else {
+            // publish if the pattern is not already published - we have a pattern there that matches our upload and is unpublished
+            // if the title is "Unpublished pattern", we can assume it is unpublished
+            const title = await page.locator('h1.Subhead-heading').textContent();
+            if (title?.includes('Unpublished pattern')) {
+                await publishPattern(page);
+            }
         }
         if (config.noChangePushProtection) {
             return;
@@ -627,7 +673,6 @@ async function processPattern(context, config, pattern) {
         }
         else {
             if (enablePushProtectionFlag) {
-                console.log(chalk.blue(`🛡️  Enabling push protection for pattern: ${pattern.name}`));
                 await togglePushProtectionConfig(page, pattern, config, enablePushProtectionFlag);
             }
         }
@@ -642,7 +687,7 @@ async function processPattern(context, config, pattern) {
         await page.close();
     }
 }
-async function testPattern(page, pattern) {
+async function testPattern(page, pattern, config) {
     const ignoreTestResult = pattern.test?.data === undefined || pattern.test.data.trim() === '';
     // Add test data
     if (!pattern.test?.data) {
@@ -653,26 +698,44 @@ async function testPattern(page, pattern) {
         };
     }
     await page.fill('div.CodeMirror-code', pattern.test.data);
-    let waiting = true;
     let testSuccess = null;
+    let tries = 0;
     // Check for test results
     // TODO: use a more robust way to check for test results, including the offsets of the result(s)
     // this might require doing a specific request using secrets derived from the page
-    while (waiting) {
+    while (!testSuccess?.includes('No matches') && !testSuccess?.match(/\s*- \d+ match(?:es)?\s*$/)) {
         testSuccess = await page.locator('div.js-test-pattern-matches').textContent();
-        if (!testSuccess?.match(/ match$/) && !testSuccess?.includes(' - No matches')) {
-            continue;
+        // wait a bit before trying again
+        await page.waitForTimeout(100);
+        if (config.debug) {
+            console.log(chalk.blue(`🔄 Waiting for test results... Current text: ${testSuccess}`));
+            console.log(chalk.blue(`🔄 Tries: ${tries}`));
+            console.log(chalk.blue(`🔄 Test data: ${pattern.test.data}`));
         }
-        ;
-        waiting = false;
+        tries++;
+        if (tries > 100) {
+            console.warn(chalk.yellow(`⚠️  Pattern test is taking longer than expected...`));
+            break;
+        }
     }
     if (!ignoreTestResult) {
-        if (testSuccess?.includes('No matches')) {
-            console.warn(chalk.red(`✖ Pattern test failed for: ${pattern.name}`));
-            throw new Error(`Pattern test failed for: ${pattern.name}`);
+        if (!testSuccess?.match(/\s*- \d+ match(?:es)?\s*$/)) {
+            console.warn(chalk.red(`✖ Pattern test failed`));
+            if (config?.debug) {
+                const screenshotPath = path.join(process.cwd(), `debug-test_failed_screenshot_${Date.now()}.png`);
+                // 50% zoom
+                await page.evaluate(() => {
+                    document.body.style.zoom = '50%';
+                });
+                // take a screenshot
+                await page.screenshot({ path: screenshotPath });
+                console.log(chalk.blue(`📸 Screenshot saved to: ${screenshotPath}`));
+            }
+            return false;
         }
-        console.log(chalk.green(`✓ Pattern test passed: ${pattern.name}`));
+        console.log(chalk.green(`✓ Pattern test passed with text: ${testSuccess}`));
     }
+    return true;
 }
 async function addAdditionalRule(page, rule, type, index) {
     // Click add button to create new additional rule
@@ -719,15 +782,49 @@ async function clickAndWaitForRedirect(page, button, config) {
     }
 }
 async function performDryRun(page, pattern, config) {
-    console.log(chalk.yellow(`🧪 Starting dry run for pattern: ${pattern.name}`));
     // Wait for the dry run button to be enabled
-    // repo level class: js-custom-pattern-submit-button
+    // repo level class: js-save-and-dry-run-button
     // org level class: js-repo-selector-dialog-summary-button
-    const dryRunButton = page.locator('button.js-custom-pattern-submit-button, button.js-save-and-dry-run-button, button.js-repo-selector-dialog-summary-button').first();
-    await dryRunButton.waitFor({ state: 'visible' });
-    const buttonID = await dryRunButton.getAttribute('id');
-    while (!await dryRunButton.isEnabled()) {
-        await page.waitForTimeout(100);
+    const dryRunButton = page.locator('button.js-save-and-dry-run-button, button.js-repo-selector-dialog-summary-button').first();
+    let buttonID = null;
+    const nullResult = {
+        id: '',
+        name: pattern.name,
+        hits: 0,
+        results: [],
+        completed: false
+    };
+    try {
+        buttonID = await dryRunButton.getAttribute('id');
+        const enabled = await dryRunButton.isEnabled();
+        if (!enabled) {
+            console.warn(chalk.yellow('⚠️ Dry run button is not enabled'));
+            if (config?.debug) {
+                const screenshotPath = path.join(process.cwd(), `debug-dry_run_button_not_enabled_screenshot_${Date.now()}.png`);
+                // 50% zoom
+                await page.evaluate(() => {
+                    document.body.style.zoom = '50%';
+                });
+                // take a screenshot
+                await page.screenshot({ path: screenshotPath });
+                console.log(chalk.blue(`📸 Screenshot saved to: ${screenshotPath}`));
+            }
+            return nullResult;
+        }
+    }
+    catch (error) {
+        console.warn(chalk.yellow(`⚠️ Error checking dry run button state: ${error}`));
+        if (config?.debug) {
+            const screenshotPath = path.join(process.cwd(), `debug-dry_run_button_state_error_screenshot_${Date.now()}.png`);
+            // 50% zoom
+            await page.evaluate(() => {
+                document.body.style.zoom = '50%';
+            });
+            // take a screenshot
+            await page.screenshot({ path: screenshotPath });
+            console.log(chalk.blue(`📸 Screenshot saved to: ${screenshotPath}`));
+        }
+        return nullResult;
     }
     // if there's no button ID, we are at repo level. We can just click the button and start the dry-run
     if (!buttonID) {
@@ -793,13 +890,7 @@ async function performDryRun(page, pattern, config) {
                 const selectedRepos = await dialog.locator('div#dry-run-selected-repos > div > ul > li').all();
                 if (selectedRepos.length === 0) {
                     console.warn(chalk.yellow('No repositories selected for dry run, please check your configuration'));
-                    return {
-                        id: '',
-                        name: pattern.name,
-                        hits: 0,
-                        results: [],
-                        completed: false
-                    };
+                    return nullResult;
                 }
             }
             // Click the confirm button
@@ -809,13 +900,7 @@ async function performDryRun(page, pattern, config) {
         else {
             // error, exit
             console.error(chalk.red(`✖ Unexpected button ID: ${buttonID}`));
-            return {
-                id: '',
-                name: pattern.name,
-                hits: 0,
-                results: [],
-                completed: false
-            };
+            return nullResult;
         }
     }
     // Extract pattern ID from the URL for tracking - split at / and pick final entry, then split at ? and pick first part
@@ -827,15 +912,13 @@ async function performDryRun(page, pattern, config) {
     }
     // Wait for dry run to complete with progress indicator
     let attempts = 0;
-    process.stdout.write(chalk.yellow('Waiting for dry run to complete'));
+    process.stdout.write(chalk.yellow('Waiting for dry run'));
     while (true) {
         try {
             // Check the dry-run status - a span with class f6, and the text "Status" is the header, and the next sibling is the status
             const statusElement = page.locator('span.f6:has-text("Status") + h5');
             const statusText = await statusElement.textContent();
             if (statusText === 'Completed') {
-                process.stdout.write('\n');
-                console.log(chalk.green('✓ Dry run completed successfully'));
                 break;
             }
             else if (statusText === 'In progress' || statusText === 'Queued') {
@@ -859,9 +942,10 @@ async function performDryRun(page, pattern, config) {
         await page.waitForLoadState('load');
         attempts++;
     }
+    process.stdout.write('\n');
     // Get dry run results
     const results = await getDryRunResults(page);
-    console.log(chalk.blue(`📊 Dry run completed: ${results.count} potential matches found`));
+    console.log(chalk.green(`✓ Dry run completed with ${results.count} matches`));
     // Display results summary
     if (results.count > 0) {
         await displayDryRunResults(results);
