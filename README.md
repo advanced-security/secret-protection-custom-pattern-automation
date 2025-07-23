@@ -1,8 +1,8 @@
 # Secret Protection Custom Pattern Automation
 
-A Playwright-based CLI tool that automates GitHub secret protection custom pattern management through browser automation.
+Automate GitHub secret protection custom pattern management through browser automation.
 
-Provides a command-line interface for uploading, testing, and managing secret protection patterns with automated tests and dry runs.
+Provides a Playwright-based command-line interface for uploading, testing, and managing secret protection patterns with automated tests and dry runs.
 
 > [!NOTE]
 > This is an _unofficial_ tool created by Field Security Specialists, and is not officially supported by GitHub.
@@ -216,7 +216,7 @@ Waiting for dry run to complete.....
 ┌───┬──────────────────────────────┬────────────────────────────────────────────────────────────┬────────────────────────────────────────────────────────────┐
 │ # │ Repository location          │ Match                                                      │ URL                                                        │
 ├───┼──────────────────────────────┼────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────┤
-│ 1 │ owner/repo1:config/db.yml     │ api_key: "sk_live_51H8q2jKl3mN4oP5qR6sT7uV8wX9yZ0A..."     │ /owner/repo1/blob/main/config/db.yml#L15                    │
+│ 1 │ owner/repo1:config/db.yml    │ api_key: "sk_live_51H8q2jKl3mN4oP5qR6sT7uV8wX9yZ0A..."     │ /owner/repo1/blob/main/config/db.yml#L15                   │
 │ 2 │ owner/repo2:src/constants.js │ const API_KEY = "ak_BmV3cDe4fGh5iJk6lMn7oPq8rSt9uVw..."    │ /owner/repo2/blob/main/src/constants.js#L8                 │
 ...
 └───┴──────────────────────────────┴────────────────────────────────────────────────────────────┴────────────────────────────────────────────────────────────┘
@@ -321,17 +321,13 @@ npm start -- --pattern patterns.yml owner/repo
 
 ## 🛡️ Security and Quality Considerations
 
-- **Pattern Review**: Always review dry-run results carefully before publishing patterns
-- **Threshold Management**: Set appropriate thresholds to prevent noisy patterns from being published
-- **Push Protection Options**:
-  - Use `--enable-push-protection` for high-confidence patterns to prevent secret commits
-  - Use `--disable-push-protection` to explicitly disable push protection
-  - Use `--no-change-push-protection` to preserve existing push protection settings
-- **Repository Selection**: Use `--dry-run-repo-list` to limit dry-run scope to specific repositories
-- **Regular Audits**: Download and review existing patterns periodically with `--download-existing`
-- **Test Data**: Provide realistic test data to validate pattern behavior before the dry-run
-- **Incremental Deployment**: Start with repository-level testing before organization-wide rollout
-- **Authentication State**: Ensure that the `.state` file is secure and not shared
+- **Check dry-run results**: Always review dry-run results carefully before publishing patterns
+- **Threshold management**: Set appropriate thresholds to prevent noisy patterns from being published automatically
+- **Regular audits**: Download and review existing patterns periodically with `--download-existing`
+- **Test data**: Provide realistic test data to validate pattern behavior before the dry-run
+- **Incremental deployment**: Start with repository-level testing before organization-wide rollout
+- **Authentication state**: Ensure that your `.state` file is secure and not shared
+- **Offline testing**: Consider also testing with the [offline custom pattern testing](https://github.com/advanced-security/secret-scanning-tools?tab=readme-ov-file#offline-testing-of-secret-scanning-custom-patterns)
 
 See also [SECURITY.md](SECURITY.md) for security reporting guidelines.
 
@@ -344,6 +340,9 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for det
 MIT License - see [LICENSE](LICENSE) file for details
 
 ## 🆘 Support
+
+> [!NOTE]
+> This is an _unofficial_ tool created by Field Security Specialists, and is not officially supported by GitHub.
 
 See [SUPPORT.md](SUPPORT.md) for support options.
 
