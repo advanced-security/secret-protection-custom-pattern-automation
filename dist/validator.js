@@ -1,35 +1,6 @@
 import chalk from 'chalk';
 import Table from 'cli-table3';
 export class PatternValidator {
-    static COMMON_REGEX_ISSUES = [
-        {
-            pattern: /\.\*/g,
-            issue: "Overly broad '.*' quantifier",
-            suggestion: "Consider using more specific patterns or bounded quantifiers like '.{1,50}'"
-        },
-        {
-            pattern: /\[0-9\]\+/g,
-            issue: "Inefficient character class",
-            suggestion: "Use '\\d+' instead of '[0-9]+'"
-        },
-        {
-            pattern: /\(\?\!/g,
-            issue: "Negative lookahead",
-            suggestion: "Consider using additional_not_match instead for better performance"
-        },
-        {
-            pattern: /\{\d+,\}/g,
-            issue: "Unbounded quantifier",
-            suggestion: "Consider setting an upper bound for performance: {n,m}"
-        }
-    ];
-    static SECURITY_PATTERNS = [
-        {
-            pattern: /password|secret|key|token/i,
-            context: "variable names",
-            suggestion: "Ensure the pattern captures actual secrets, not just variable names"
-        }
-    ];
     static validatePattern(pattern) {
         const result = {
             isValid: true,
@@ -56,7 +27,7 @@ export class PatternValidator {
             aggregateResult.errors.push("Pattern file must contain at least one pattern");
         }
         const patternNames = new Set();
-        for (const [index, pattern] of (patternFile.patterns || []).entries()) {
+        for (const pattern of (patternFile.patterns || [])) {
             const patternResult = this.validatePattern(pattern);
             // Check for duplicate names
             if (patternNames.has(pattern.name)) {

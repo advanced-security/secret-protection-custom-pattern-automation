@@ -10,7 +10,7 @@ Arguments:
 
 Options:
   --server <url>        GitHub server URL (default: https://github.com)
-  --scope <scope>       Target scope: repo, org, enterprise (auto-detected from target)
+  --scope <scope>       Target scope: repo, org, enterprise (auto-detected for repos, and assumed to be org if not a repository)
   --pattern <file>      Pattern file(s) to upload (can be specified multiple times)
   --dry-run-threshold <n>  Maximum allowed dry-run results before skipping (default: 50)
   --enable-push-protection  Enable push protection for uploaded patterns

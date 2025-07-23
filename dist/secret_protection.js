@@ -14,7 +14,6 @@ export async function main() {
     const config = parseArgs();
     if (!config) {
         console.error(chalk.red('✖ Invalid configuration. Please check your command line arguments.'));
-        // show HELP_TEXT from cli
         console.log(HELP_TEXT);
         process.exit(1);
     }
@@ -55,7 +54,7 @@ export async function main() {
         process.exit(1);
     }
     const browser = await chromium.launch({ headless: config.headless });
-    const context = await browser.newContext({ storageState: state });
+    const context = await browser.newContext({ storageState: state || undefined });
     try {
         if (config.downloadExisting) {
             await downloadExistingPatterns(context, config);
@@ -72,7 +71,7 @@ function parseArgs() {
     const args = minimist(process.argv.slice(2));
     const target = args._.pop();
     // For validate-only mode, target can be a placeholder
-    if (args['validate-only'] && !target) {
+    if (args['validate-only']) {
         console.log(chalk.yellow('ℹ️  Running validation-only mode without target specification'));
         return {
             server: 'https://github.com',
@@ -148,7 +147,7 @@ async function login(server) {
         console.log(chalk.gray('🔑 Using existing authentication from .state file'));
         return;
     }
-    catch (error) {
+    catch {
         console.log(chalk.blue('🔑 No existing authentication found, doing browser login'));
     }
     const browser = await chromium.launch({ headless: false });
@@ -238,6 +237,9 @@ async function downloadExistingPatterns(context, config) {
                     const beforeSecret = await patternPage.locator('#before_secret').getAttribute('value');
                     const afterSecret = await patternPage.locator('#after_secret').getAttribute('value');
                     const additionalMatches = await patternPage.locator('.js-additional-secret-format').all();
+                    if (patternName !== name) {
+                        console.warn(chalk.yellow(`⚠️ Pattern name mismatch: expected "${name}", found "${patternName}"`));
+                    }
                     // record if it is published or not
                     const subHead = await patternPage.locator('h1.Subhead-heading').textContent();
                     const isPublished = subHead?.includes('Update pattern');
@@ -270,7 +272,7 @@ async function downloadExistingPatterns(context, config) {
                     }
                     // Convert to the Pattern interface format
                     const pattern = {
-                        name: name || `Pattern_${id}`,
+                        name: patternName || `Pattern_${id}`,
                         regex: {
                             version: 1,
                             pattern: secretFormat || '',
@@ -342,12 +344,12 @@ async function loadPatternFile(filePath) {
     try {
         return yaml.load(content);
     }
-    catch (yamlError) {
+    catch {
         try {
             return JSON.parse(content);
         }
         catch (jsonError) {
-            throw new Error(`Failed to parse file as YAML or JSON: ${yamlError}`);
+            throw new Error(`Failed to parse file as YAML or JSON: ${jsonError}`);
         }
     }
 }
@@ -387,7 +389,7 @@ async function expandMoreOptions(page) {
 function comparePatterns(patternA, patternB) {
     return patternA?.trim() === patternB?.trim();
 }
-async function fillInPattern(page, pattern, isExisting = false, config) {
+async function fillInPattern(page, pattern, isExisting = false, _config) {
     // If this is an existing pattern, clear the fields first, if they are different to what we are uploading
     if (isExisting) {
         let changed = false;
@@ -949,7 +951,7 @@ async function togglePushProtection(page, enable) {
     const pushProtectionToggle = page.locator('button[name="push_protection_enabled"]');
     if (await pushProtectionToggle.isVisible()) {
         const label = await pushProtectionToggle.locator('span.Button-label').first();
-        const isEnabled = (await label.textContent())?.trim() == 'Disable';
+        const isEnabled = (await label.textContent())?.trim() === 'Disable';
         if (!isEnabled && enable || isEnabled && !enable) {
             await pushProtectionToggle.click();
             await page.waitForLoadState('load');
