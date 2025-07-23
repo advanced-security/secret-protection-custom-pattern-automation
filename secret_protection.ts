@@ -90,9 +90,9 @@ export async function main() {
             console.error(chalk.red('✖ No pattern files specified for validation'));
             process.exit(1);
         }
-        
+
         console.log(chalk.yellow('🔍 Running validation-only mode (no upload)'));
-        
+
         for (const patternPath of config.patterns) {
             try {
                 console.log(chalk.blue(`\n📁 Loading pattern file: ${patternPath}`));
@@ -103,7 +103,7 @@ export async function main() {
                 process.exit(1);
             }
         }
-        
+
         console.log(chalk.green('\n✓ All pattern files passed validation'));
         process.exit(0);
     }
@@ -122,7 +122,7 @@ export async function main() {
 
     const browser = await chromium.launch({ headless: config.headless });
     const context = await browser.newContext({ storageState: state });
-    
+
     try {
         if (config.downloadExisting) {
             await downloadExistingPatterns(context, config);
@@ -136,11 +136,11 @@ export async function main() {
     }
 }
 
-function parseArgs(): Config|undefined {
+function parseArgs(): Config | undefined {
     const args = minimist(process.argv.slice(2));
 
     const target: string | undefined = args._.pop();
-    
+
     // For validate-only mode, target can be a placeholder
     if (args['validate-only'] && !target) {
         console.log(chalk.yellow('ℹ️  Running validation-only mode without target specification'));
@@ -154,7 +154,7 @@ function parseArgs(): Config|undefined {
             dryRunAllRepos: true,
         };
     }
-    
+
     if (!target) {
         console.error(chalk.red('✖ Please provide a target repository, organization, or enterprise.'));
         process.exit(1);
@@ -225,7 +225,7 @@ async function login(server: string) {
         state = JSON.parse(await fs.readFile(stateFilePath, 'utf-8'));
         console.log(chalk.gray('🔑 Using existing authentication from .state file'));
         return;
-    } catch (error) {
+    } catch {
         console.log(chalk.blue('🔑 No existing authentication found, doing browser login'));
     }
 
@@ -255,7 +255,7 @@ async function login(server: string) {
 async function downloadExistingPatterns(context: BrowserContext, config: Config): Promise<void> {
     console.log('Downloading existing patterns...');
     const page = await context.newPage();
-    
+
     try {
         const url_path = config.scope !== 'enterprise' ? 'settings/security_analysis' : 'settings/security_analysis_policies/security_features';
         const url = buildUrl(config, url_path);
@@ -276,7 +276,7 @@ async function downloadExistingPatterns(context: BrowserContext, config: Config)
         const progressBar = new cliProgress.MultiBar({}, cliProgress.Presets.shades_classic);
         const progressBarSimple = progressBar.create(count, 0);
 
-        while(keepGoing) {
+        while (keepGoing) {
             await page.waitForLoadState('load');
 
             const customPatternList = page.locator('.js-custom-pattern-list').first();
@@ -345,6 +345,10 @@ async function downloadExistingPatterns(context: BrowserContext, config: Config)
                     const afterSecret = await patternPage.locator('#after_secret').getAttribute('value');
                     const additionalMatches = await patternPage.locator('.js-additional-secret-format').all();
 
+                    if (patternName !== name) {
+                        console.warn(chalk.yellow(`⚠️ Pattern name mismatch: expected "${name}", found "${patternName}"`));
+                    }
+
                     // record if it is published or not
                     const subHead = await patternPage.locator('h1.Subhead-heading').textContent();
                     const isPublished = subHead?.includes('Update pattern');
@@ -387,7 +391,7 @@ async function downloadExistingPatterns(context: BrowserContext, config: Config)
 
                     // Convert to the Pattern interface format
                     const pattern: Pattern = {
-                        name: name || `Pattern_${id}`,
+                        name: patternName || `Pattern_${id}`,
                         regex: {
                             version: 1,
                             pattern: secretFormat || '',
@@ -420,13 +424,13 @@ async function downloadExistingPatterns(context: BrowserContext, config: Config)
         }
 
         progressBar.stop();
-        
+
         // Create PatternFile structure matching the import format
         const patternFile: PatternFile = {
             name: `Downloaded patterns from ${config.target}`,
             patterns: extractedPatterns
         };
-        
+
         // Save patterns to file
         const outputPath = path.join(process.cwd(), 'existing-patterns.yml');
         await fs.writeFile(outputPath, yaml.dump(patternFile));
@@ -449,7 +453,7 @@ async function uploadPatterns(context: BrowserContext, config: Config): Promise<
         try {
             console.log(`Processing pattern file: ${patternPath}`);
             const patternFile = await loadPatternFile(patternPath);
-            
+
             if (config.validate) {
                 validatePatterns(patternFile);
             }
@@ -466,28 +470,28 @@ async function uploadPatterns(context: BrowserContext, config: Config): Promise<
 
 async function loadPatternFile(filePath: string): Promise<PatternFile> {
     const content = await fs.readFile(filePath, 'utf-8');
-    
+
     try {
         return yaml.load(content) as PatternFile;
-    } catch (yamlError) {
+    } catch {
         try {
             return JSON.parse(content) as PatternFile;
         } catch (jsonError) {
-            throw new Error(`Failed to parse file as YAML or JSON: ${yamlError}`);
+            throw new Error(`Failed to parse file as YAML or JSON: ${jsonError}`);
         }
     }
 }
 
 function validatePatterns(patternFile: PatternFile): void {
     const fileResult = PatternValidator.validatePatternFile(patternFile);
-    
+
     if (fileResult.isValid) {
         console.log(chalk.green('✔ All patterns passed validation'));
     } else {
         PatternValidator.printValidationReport(fileResult);
         throw new Error('Pattern validation failed');
     }
-    
+
     // Individual pattern validation for detailed reporting
     const patternResults = patternFile.patterns.map(pattern => ({
         name: pattern.name,
@@ -515,12 +519,12 @@ async function expandMoreOptions(page: Page): Promise<void> {
     }
 }
 
-function comparePatterns(patternA: string|undefined, patternB: string|undefined): boolean {
+function comparePatterns(patternA: string | undefined, patternB: string | undefined): boolean {
     return patternA?.trim() === patternB?.trim();
 }
 
-async function fillInPattern(page: Page, pattern: Pattern, isExisting: boolean = false, config: Config): Promise<boolean> {
-    
+async function fillInPattern(page: Page, pattern: Pattern, isExisting: boolean = false, _config: Config): Promise<boolean> {
+
     // If this is an existing pattern, clear the fields first, if they are different to what we are uploading
     if (isExisting) {
         let changed: Boolean = false;
@@ -547,7 +551,7 @@ async function fillInPattern(page: Page, pattern: Pattern, isExisting: boolean =
                 changed = true;
             }
         }
-        
+
         const afterSecretInput = page.locator('input[name="after_secret"]');
         const afterSecretContent = await afterSecretInput.getAttribute('value');
         if (afterSecretContent && !comparePatterns(afterSecretContent, pattern.regex.end)) {
@@ -627,32 +631,32 @@ async function fillInPattern(page: Page, pattern: Pattern, isExisting: boolean =
     const secretFormat = page.locator('input[name="secret_format"]');
     await secretFormat.click();
     await secretFormat.fill(pattern.regex.pattern);
-    
+
     if (pattern.regex.start) {
         const beforeSecretInput = page.locator('input[name="before_secret"]');
         await beforeSecretInput.click();
         await beforeSecretInput.fill(pattern.regex.start);
     }
-    
+
     if (pattern.regex.end) {
         const afterSecretInput = page.locator('input[name="after_secret"]');
         await afterSecretInput.click();
         await afterSecretInput.fill(pattern.regex.end);
     }
-    
+
     if (pattern.regex.additional_match && pattern.regex.additional_match.length > 0) {
         for (const [index, rule] of pattern.regex.additional_match.entries()) {
             await addAdditionalRule(page, rule, 'must_match', index);
         }
     }
-    
+
     if (pattern.regex.additional_not_match && pattern.regex.additional_not_match.length > 0) {
         for (const [index, rule] of pattern.regex.additional_not_match.entries()) {
             const offset = pattern.regex.additional_match?.length || 0;
             await addAdditionalRule(page, rule, 'must_not_match', index + offset);
         }
     }
-    
+
     console.log(chalk.green(`✓ Pattern information filled successfully`));
 
     return true;
@@ -661,7 +665,7 @@ async function fillInPattern(page: Page, pattern: Pattern, isExisting: boolean =
 // TODO: cache the names we have already seen, so we don't have to keep checking - and store any newly created name/id pairs as we go, too
 async function findExistingPatternByName(context: BrowserContext, config: Config, patternName: string): Promise<string | null> {
     const page = await context.newPage();
-    
+
     try {
         const url_path = config.scope !== 'enterprise' ? 'settings/security_analysis' : 'settings/security_analysis_policies/security_features';
         const url = buildUrl(config, url_path);
@@ -733,13 +737,13 @@ async function findExistingPatternByName(context: BrowserContext, config: Config
 // TODO: catch errors/warnings after each step and log them, or stop on error
 async function processPattern(context: BrowserContext, config: Config, pattern: Pattern): Promise<void> {
     console.log(chalk.bold(`\n🔄 Processing pattern: ${pattern.name}`));
-    
+
     const page = await context.newPage();
-    
+
     try {
         // Look at existing patterns to see if one matches this pattern name
         const existingPatternUrl = await findExistingPatternByName(context, config, pattern.name);
-        
+
         let url: string;
         if (existingPatternUrl) {
             url = `${config.server}${existingPatternUrl}`;
@@ -763,7 +767,7 @@ async function processPattern(context: BrowserContext, config: Config, pattern: 
 
             // Interactive confirmation based on results
             const shouldProceed = await confirmPatternAction(pattern, dryRunResult, config);
-            
+
             if (!shouldProceed) {
                 console.log(chalk.yellow(`⏭️  Skipped pattern: ${pattern.name}`));
                 return;
@@ -795,7 +799,7 @@ async function processPattern(context: BrowserContext, config: Config, pattern: 
             });
             enablePushProtectionFlag = enablePushProtection;
         }
-    
+
         if (config.scope === 'repo') {
             await togglePushProtection(page, enablePushProtectionFlag);
         } else {
@@ -807,7 +811,7 @@ async function processPattern(context: BrowserContext, config: Config, pattern: 
 
         const actionPast = existingPatternUrl ? 'updated' : 'created';
         console.log(chalk.green(`✓ Successfully ${actionPast} pattern: ${pattern.name}`));
-        
+
     } catch (error) {
         console.error(chalk.red(`✖ Failed to process pattern "${pattern.name}":`, error));
         throw error;
@@ -827,7 +831,7 @@ async function testPattern(page: Page, pattern: Pattern): Promise<void> {
             data: ' '
         };
     }
-    
+
     await page.fill('div.CodeMirror-code', pattern.test.data);
 
     let waiting = true;
@@ -860,16 +864,16 @@ async function addAdditionalRule(page: Page, rule: string, type: 'must_match' | 
     // Click add button to create new additional rule
     const addButton = page.locator('.js-add-secret-format-button');
     await addButton.click();
-    
+
     // Wait for the new rule input to appear
     await page.waitForSelector(`input[name="post_processing_${index}"]`, { timeout: 5000 });
-    
+
     // Fill in the rule
     await page.fill(`input[name="post_processing_${index}"]`, rule);
-    
+
     // Select the appropriate radio button
     await page.check(`input[name="post_processing_rule_${index}"][value="${type}"]`);
-    
+
     // Small delay to ensure the change is registered
     await page.waitForTimeout(200);
 }
@@ -877,7 +881,7 @@ async function addAdditionalRule(page: Page, rule: string, type: 'must_match' | 
 async function clickAndWaitForRedirect(page: Page, button: Locator, config: Config): Promise<void> {
     // Click the button and wait for navigation
     const [response] = await Promise.all([
-        page.waitForResponse(response => response.url().includes('custom_patterns') && response.status() >= 300 &&response.status() < 400),
+        page.waitForResponse(response => response.url().includes('custom_patterns') && response.status() >= 300 && response.status() < 400),
         button.click()
     ]);
 
@@ -897,7 +901,7 @@ async function clickAndWaitForRedirect(page: Page, button: Locator, config: Conf
                 console.log(chalk.blue(`📸 Screenshot saved to: ${screenshotPath}`));
             }
         }
-        
+
         // Wait for the page to fully load after redirect
         await page.waitForLoadState('load');
     } catch (err) {
@@ -909,14 +913,14 @@ async function clickAndWaitForRedirect(page: Page, button: Locator, config: Conf
 
 async function performDryRun(page: Page, pattern: Pattern, config: Config): Promise<DryRunResult> {
     console.log(chalk.yellow(`🧪 Starting dry run for pattern: ${pattern.name}`));
-    
+
     // Wait for the dry run button to be enabled
     // repo level class: js-custom-pattern-submit-button
     // org level class: js-repo-selector-dialog-summary-button
     const dryRunButton = page.locator('button.js-custom-pattern-submit-button, button.js-save-and-dry-run-button, button.js-repo-selector-dialog-summary-button').first();
     await dryRunButton.waitFor({ state: 'visible' });
     const buttonID = await dryRunButton.getAttribute('id');
-    
+
     while (!await dryRunButton.isEnabled()) {
         await page.waitForTimeout(100);
     }
@@ -951,7 +955,7 @@ async function performDryRun(page: Page, pattern: Pattern, config: Config): Prom
                     const specificReposOption = dialog.locator('input[type="radio"][id="dry_run_repo_selection_selected_repos"]');
                     await specificReposOption.check();
                 }
-                
+
                 // Select specific repositories
                 for (let repo of config.dryRunRepoList) {
                     console.log(chalk.blue(`Selecting repository for dry run: ${repo}`));
@@ -1029,9 +1033,9 @@ async function performDryRun(page: Page, pattern: Pattern, config: Config): Prom
 
     // Wait for dry run to complete with progress indicator
     let attempts = 0;
-    
+
     process.stdout.write(chalk.yellow('Waiting for dry run to complete'));
-    
+
     while (true) {
         try {
             // Check the dry-run status - a span with class f6, and the text "Status" is the header, and the next sibling is the status
@@ -1055,10 +1059,10 @@ async function performDryRun(page: Page, pattern: Pattern, config: Config): Prom
             }
             process.stdout.write('.');
         }
-        
+
         await page.waitForTimeout(5000); // Wait 5 seconds
         // TODO: back off a bit after some time, maybe a logistic curve? Grow exponentially at first, then slow down the growth
-        
+
         await page.reload();
         await page.waitForLoadState('load');
         attempts++;
@@ -1066,14 +1070,14 @@ async function performDryRun(page: Page, pattern: Pattern, config: Config): Prom
 
     // Get dry run results
     const results = await getDryRunResults(page);
-    
+
     console.log(chalk.blue(`📊 Dry run completed: ${results.count} potential matches found`));
-    
+
     // Display results summary
     if (results.count > 0) {
         await displayDryRunResults(results);
     }
-    
+
     return {
         id: patternId,
         name: pattern.name,
@@ -1112,7 +1116,7 @@ async function getDryRunResults(page: Page): Promise<{ count: number; results: a
         // loop over table results, until we have found enough results or exhausted the list
         let resultsProcessed = 0;
 
-        while(true) {
+        while (true) {
             // grab the new results list
             const resultsList = await resultsContainer.locator('div.Box > ul');
             const resultsItems = await resultsList.locator('li').all();
@@ -1126,11 +1130,11 @@ async function getDryRunResults(page: Page): Promise<{ count: number; results: a
                     continue;
                 }
                 const link = await linkElement.getAttribute('href');
-                
+
                 // pull out the partial match, which is the first child span element of the anchor, then the repo/location, which is the second child span element
                 const matchElement = linkElement.locator('span').first();
                 const match = await matchElement.textContent();
-                
+
                 // pull out the repository/location, which is the second child span element
                 const repoElement = linkElement.locator('span.color-fg-muted').first();
                 const repositoryLocation = await repoElement.textContent();
@@ -1151,7 +1155,7 @@ async function getDryRunResults(page: Page): Promise<{ count: number; results: a
 
             // find the Next > button, click it, wait for the page to reload
             const nextButton = resultsContainer.locator('button#next_cursor_button');
-            
+
             if (!await nextButton.isEnabled()) {
                 console.log(chalk.blue('No more results to process'));
                 break;
@@ -1179,13 +1183,13 @@ async function publishPattern(page: Page): Promise<void> {
     // TODO: Check for success message
 }
 
-async function togglePushProtection(page: Page, enable: boolean|undefined): Promise<void> {
+async function togglePushProtection(page: Page, enable: boolean | undefined): Promise<void> {
     const pushProtectionToggle = page.locator('button[name="push_protection_enabled"]');
-    
+
     if (await pushProtectionToggle.isVisible()) {
         const label = await pushProtectionToggle.locator('span.Button-label').first();
 
-        const isEnabled = (await label.textContent())?.trim() == 'Disable';
+        const isEnabled = (await label.textContent())?.trim() === 'Disable';
 
         if (!isEnabled && enable || isEnabled && !enable) {
             await pushProtectionToggle.click();
@@ -1215,7 +1219,7 @@ async function togglePushProtectionConfig(page: Page, pattern: Pattern, config: 
     const inputSearchFilter = page.locator('input#pattern-configs-filter-input');
     await inputSearchFilter.click();
     await inputSearchFilter.fill(`name:"${pattern.name}"`);
-    
+
     // wait for the results to filter down
     await page.waitForTimeout(200);
 
@@ -1307,14 +1311,14 @@ async function displayDryRunResults(results: { count: number; results: any[] }):
 async function confirmPatternAction(pattern: Pattern, dryRunResult: DryRunResult, config: Config): Promise<boolean> {
     if (config.dryRunThreshold && dryRunResult.hits > config.dryRunThreshold) {
         console.log(chalk.red(`\n✖ Pattern "${pattern.name}" exceeds dry run threshold (${dryRunResult.hits} > ${config.dryRunThreshold})`));
-        
+
         const answer = await inquirer.prompt([{
             type: 'confirm',
             name: 'proceed',
             message: 'Do you want to proceed anyway?',
             default: false
         }]);
-        
+
         if (!answer.proceed) {
             console.log(chalk.yellow(`⏭️  Skipping pattern "${pattern.name}" due to dry run threshold`));
             return false;
@@ -1326,7 +1330,7 @@ async function confirmPatternAction(pattern: Pattern, dryRunResult: DryRunResult
 
 function buildUrl(config: Config, ...pathSegments: string[]): string {
     let basePath = '';
-    
+
     if (config.scope === 'repo') {
         const [owner, repo] = config.target.split('/', 2);
         if (!owner || !repo) {
@@ -1338,6 +1342,6 @@ function buildUrl(config: Config, ...pathSegments: string[]): string {
     } else if (config.scope === 'enterprise') {
         basePath = `${config.server}/enterprises/${config.target}`;
     }
-    
+
     return `${basePath}/${pathSegments.join('/')}`;
 }

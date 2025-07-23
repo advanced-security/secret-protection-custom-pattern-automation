@@ -10,36 +10,6 @@ export interface ValidationResult {
 }
 
 export class PatternValidator {
-    private static readonly COMMON_REGEX_ISSUES = [
-        {
-            pattern: /\.\*/g,
-            issue: "Overly broad '.*' quantifier",
-            suggestion: "Consider using more specific patterns or bounded quantifiers like '.{1,50}'"
-        },
-        {
-            pattern: /\[0-9\]\+/g,
-            issue: "Inefficient character class",
-            suggestion: "Use '\\d+' instead of '[0-9]+'"
-        },
-        {
-            pattern: /\(\?\!/g,
-            issue: "Negative lookahead",
-            suggestion: "Consider using additional_not_match instead for better performance"
-        },
-        {
-            pattern: /\{\d+,\}/g,
-            issue: "Unbounded quantifier",
-            suggestion: "Consider setting an upper bound for performance: {n,m}"
-        }
-    ];
-
-    private static readonly SECURITY_PATTERNS = [
-        {
-            pattern: /password|secret|key|token/i,
-            context: "variable names",
-            suggestion: "Ensure the pattern captures actual secrets, not just variable names"
-        }
-    ];
 
     public static validatePattern(pattern: Pattern): ValidationResult {
         const result: ValidationResult = {
@@ -73,9 +43,9 @@ export class PatternValidator {
         }
 
         const patternNames = new Set<string>();
-        for (const [index, pattern] of (patternFile.patterns || []).entries()) {
+        for (const pattern of (patternFile.patterns || [])) {
             const patternResult = this.validatePattern(pattern);
-            
+
             // Check for duplicate names
             if (patternNames.has(pattern.name)) {
                 aggregateResult.errors.push(`Duplicate pattern name: "${pattern.name}"`);
@@ -139,7 +109,7 @@ export class PatternValidator {
 
     public static printValidationReport(result: ValidationResult, patternName?: string): void {
         const title = patternName ? `Validation Report for "${patternName}"` : 'Validation Report';
-        
+
         console.log(chalk.bold.underline(`\n${title}`));
 
         if (result.isValid) {

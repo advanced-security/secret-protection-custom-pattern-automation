@@ -13,14 +13,23 @@
     "dev": "tsc --watch",
     "validate": "npm run build --silent && node dist/cli.js --validate-only",
     "download": "npm run build --silent && node dist/cli.js --download-existing",
-    "help": "npm run build --silent && node dist/cli.js --help"
+    "help": "npm run build --silent && node dist/cli.js --help",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "npm run lint && npm run build"
   },
   "devDependencies": {
+    "@eslint/js": "^9.31.0",
     "@types/cli-progress": "^3.11.6",
     "@types/inquirer": "^9.0.7",
     "@types/js-yaml": "^4.0.9",
     "@types/minimist": "^1.2.5",
-    "@types/node": "^24.0.3"
+    "@types/node": "^24.0.3",
+    "@typescript-eslint/eslint-plugin": "^8.2.0",
+    "@typescript-eslint/parser": "^8.2.0",
+    "eslint": "^9.31.0",
+    "eslint-plugin-github": "^5.0.1",
+    "typescript": "^5.5.4"
   },
   "dependencies": {
     "@types/js-yaml": "^4.0.9",

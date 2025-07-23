@@ -1,28 +1,28 @@
 name: Example API Keys and Tokens
 
 patterns:
-  - name: Generic API Key
-    type: generic_api_key
-    regex:
-      version: 0.1
-      pattern: |
-        [a-zA-Z0-9+/_-]{32,64}={0,2}
-      start: |
-        (?i)(?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token)[_\s]*[=:]\s*['"]*
-      end: |
-        ['"]*(?:\s|$|[,\]}])
-      additional_not_match:
-        - ^(?i)(test|example|demo|sample|dummy|fake|placeholder|your[_-]?key|insert[_-]?key|replace[_-]?this)$
-        - ^[0]{8,}$
-        - ^[1]{8,}$
-    test:
-      data: 'api_key = "abc123def456ghi789jkl012mno345pqr567stu890"'
-      start_offset: 11
-      end_offset: -2
-    comments:
-      - "Matches generic API keys with 32-64 alphanumeric characters"
-      - "Includes common variable names for API keys"
-      - "Excludes common test/placeholder values"
+  # - name: Generic API Key
+  #   type: generic_api_key
+  #   regex:
+  #     version: 0.1
+  #     pattern: |
+  #       [a-zA-Z0-9+/_-]{32,64}={0,2}
+  #     start: |
+  #       (?i)(?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token)[_\s]*[=:]\s*['"]*
+  #     end: |
+  #       ['"]*(?:\s|$|[,\]}])
+  #     additional_not_match:
+  #       - ^(?i)(test|example|demo|sample|dummy|fake|placeholder|your[_-]?key|insert[_-]?key|replace[_-]?this)$
+  #       - ^[0]{8,}$
+  #       - ^[1]{8,}$
+  #   test:
+  #     data: 'api_key = "abc123def456ghi789jkl012mno345pqr567stu890"'
+  #     start_offset: 11
+  #     end_offset: -2
+  #   comments:
+  #     - "Matches generic API keys with 32-64 alphanumeric characters"
+  #     - "Includes common variable names for API keys"
+  #     - "Excludes common test/placeholder values"
 
   - name: Test123
     regex:
