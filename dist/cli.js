@@ -27,6 +27,12 @@ Options:
   --dry-run-repo-list <repo>  Specific repositories for dry-run (can be specified multiple times)
   --help               Show this help message
 
+# Optional: Set default server for GitHub Enterprise
+export GITHUB_SERVER=https://github.example.com
+
+# Optional: Set default dry-run threshold  
+export DRY_RUN_THRESHOLD=25
+
 Examples:
   # Upload patterns to a repository
   npm start -- --pattern patterns.yml owner/repo

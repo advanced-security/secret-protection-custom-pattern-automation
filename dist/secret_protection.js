@@ -105,11 +105,11 @@ function parseArgs() {
         process.exit(1);
     }
     const config = {
-        server: args.server ?? 'https://github.com',
+        server: args.server ?? process.env.GITHUB_SERVER ?? 'https://github.com',
         target,
         scope,
         patterns: args.pattern ? (Array.isArray(args.pattern) ? args.pattern : [args.pattern]) : undefined,
-        dryRunThreshold: args['dry-run-threshold'] ? parseInt(args['dry-run-threshold'], 10) : 50,
+        dryRunThreshold: process.env.DRY_RUN_THRESHOLD ? parseInt(process.env.DRY_RUN_THRESHOLD, 10) : 50,
         enablePushProtection: args['enable-push-protection'] ?? false,
         noChangePushProtection: args['no-change-push-protection'] ?? false,
         disablePushProtection: args['disable-push-protection'] ?? false,
