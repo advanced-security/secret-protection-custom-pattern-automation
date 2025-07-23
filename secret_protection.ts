@@ -41,11 +41,37 @@ export interface PatternFile {
     patterns: Pattern[];
 }
 
+interface BrowserStorageState {
+    cookies: Array<{
+        name: string;
+        value: string;
+        domain: string;
+        path: string;
+        expires: number;
+        httpOnly: boolean;
+        secure: boolean;
+        sameSite: "Strict" | "Lax" | "None";
+    }>;
+    origins: Array<{
+        origin: string;
+        localStorage: Array<{
+            name: string;
+            value: string;
+        }>;
+    }>;
+}
+
+interface DryRunMatch {
+    match: string | undefined;
+    repository_location: string | undefined;
+    link: string | null;
+}
+
 interface DryRunResult {
     id: string;
     name: string;
     hits: number;
-    results: any[];
+    results: DryRunMatch[];
     completed: boolean;
 }
 
@@ -67,14 +93,13 @@ interface Config {
     dryRunRepoList?: string[];
 }
 
-let state: any = null;
+let state: BrowserStorageState | null = null;
 
 export async function main() {
     const config = parseArgs();
 
     if (!config) {
         console.error(chalk.red('✖ Invalid configuration. Please check your command line arguments.'));
-        // show HELP_TEXT from cli
         console.log(HELP_TEXT);
         process.exit(1);
     }
@@ -121,7 +146,7 @@ export async function main() {
     }
 
     const browser = await chromium.launch({ headless: config.headless });
-    const context = await browser.newContext({ storageState: state });
+    const context = await browser.newContext({ storageState: state || undefined });
 
     try {
         if (config.downloadExisting) {
@@ -142,7 +167,7 @@ function parseArgs(): Config | undefined {
     const target: string | undefined = args._.pop();
 
     // For validate-only mode, target can be a placeholder
-    if (args['validate-only'] && !target) {
+    if (args['validate-only']) {
         console.log(chalk.yellow('ℹ️  Running validation-only mode without target specification'));
         return {
             server: 'https://github.com',
@@ -268,7 +293,7 @@ async function downloadExistingPatterns(context: BrowserContext, config: Config)
         }
 
         let keepGoing = true;
-        const extractedPatterns: any[] = [];
+        const extractedPatterns: Pattern[] = [];
         let count = 0;
         let firstPage = true;
 
@@ -1087,8 +1112,8 @@ async function performDryRun(page: Page, pattern: Pattern, config: Config): Prom
     };
 }
 
-async function getDryRunResults(page: Page): Promise<{ count: number; results: any[] }> {
-    const results: any[] = [];
+async function getDryRunResults(page: Page): Promise<{ count: number; results: DryRunMatch[] }> {
+    const results: DryRunMatch[] = [];
     let count = 0;
 
     try {
@@ -1279,7 +1304,7 @@ async function togglePushProtectionConfig(page: Page, pattern: Pattern, config: 
     console.log(chalk.green(`✓ Push protection ${enablePushProtectionFlag ? 'enabled' : 'disabled'}`));
 }
 
-async function displayDryRunResults(results: { count: number; results: any[] }): Promise<void> {
+async function displayDryRunResults(results: { count: number; results: DryRunMatch[] }): Promise<void> {
     if (results.count === 0) {
         console.log(chalk.green('\n✓ No results found - clean dry run'));
         return;
