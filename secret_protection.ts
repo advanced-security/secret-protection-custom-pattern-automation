@@ -1211,20 +1211,16 @@ async function publishPattern(page: Page): Promise<void> {
 async function togglePushProtection(page: Page, enable: boolean | undefined): Promise<void> {
     const pushProtectionToggle = page.locator('button[name="push_protection_enabled"]');
 
-    if (await pushProtectionToggle.isVisible()) {
-        const label = await pushProtectionToggle.locator('span.Button-label').first();
+    const label = await pushProtectionToggle.locator('span.Button-label').first();
 
-        const isEnabled = (await label.textContent())?.trim() === 'Disable';
+    const isEnabled = (await label.textContent())?.trim() === 'Disable';
 
-        if (!isEnabled && enable || isEnabled && !enable) {
-            await pushProtectionToggle.click();
-            await page.waitForLoadState('load');
-            console.log(chalk.green(`✓ Push protection ${enable ? 'enabled' : 'disabled'}`));
-        } else {
-            console.log(chalk.green(`✓ Push protection already ${enable ? 'enabled' : 'disabled'}`));
-        }
+    if (!isEnabled && enable || isEnabled && !enable) {
+        await pushProtectionToggle.click();
+        await page.waitForLoadState('load');
+        console.log(chalk.green(`✓ Push protection ${enable ? 'enabled' : 'disabled'}`));
     } else {
-        console.warn(chalk.yellow(`⚠️ Push protection toggle not found`));
+        console.log(chalk.green(`✓ Push protection already ${enable ? 'enabled' : 'disabled'}`));
     }
 }
 
