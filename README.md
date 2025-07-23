@@ -216,7 +216,7 @@ Waiting for dry run to complete.....
 ┌───┬──────────────────────────────┬────────────────────────────────────────────────────────────┬────────────────────────────────────────────────────────────┐
 │ # │ Repository location          │ Match                                                      │ URL                                                        │
 ├───┼──────────────────────────────┼────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────┤
-│ 1 │ owner/repo1:config/db.yml     │ api_key: "sk_live_51H8q2jKl3mN4oP5qR6sT7uV8wX9yZ0A..."     │ /owner/repo1/blob/main/config/db.yml#L15                    │
+│ 1 │ owner/repo1:config/db.yml    │ api_key: "sk_live_51H8q2jKl3mN4oP5qR6sT7uV8wX9yZ0A..."     │ /owner/repo1/blob/main/config/db.yml#L15                   │
 │ 2 │ owner/repo2:src/constants.js │ const API_KEY = "ak_BmV3cDe4fGh5iJk6lMn7oPq8rSt9uVw..."    │ /owner/repo2/blob/main/src/constants.js#L8                 │
 ...
 └───┴──────────────────────────────┴────────────────────────────────────────────────────────────┴────────────────────────────────────────────────────────────┘
