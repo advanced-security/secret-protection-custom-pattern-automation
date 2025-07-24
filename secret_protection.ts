@@ -1012,7 +1012,10 @@ async function performDryRun(page: Page, pattern: Pattern, config: Config): Prom
     // Wait for the dry run button to be enabled
     // repo level class: js-save-and-dry-run-button
     // org level class: js-repo-selector-dialog-summary-button
-    const dryRunButton = page.locator('button.js-save-and-dry-run-button, button.js-repo-selector-dialog-summary-button').first();
+
+    const selectorClass = config.scope === 'repo' ? 'js-save-and-dry-run-button' : 'js-repo-selector-dialog-summary-button';
+
+    const dryRunButton = page.locator(`button.${selectorClass}`).first();
     let buttonID: string | null | undefined = null;
 
     const nullResult: DryRunResult = {
