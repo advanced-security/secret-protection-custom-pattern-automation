@@ -44,7 +44,7 @@ export async function main() {
         process.exit(0);
     }
     try {
-        await login(config.server);
+        await login(config.server, config);
     }
     catch (error) {
         console.error(chalk.red('✖ Login failed:'), error);
@@ -110,7 +110,7 @@ function parseArgs() {
         target,
         scope,
         patterns: args.pattern ? (Array.isArray(args.pattern) ? args.pattern : [args.pattern]) : undefined,
-        dryRunThreshold: process.env.DRY_RUN_THRESHOLD ? parseInt(process.env.DRY_RUN_THRESHOLD, 10) : 50,
+        dryRunThreshold: process.env.DRY_RUN_THRESHOLD ? parseInt(process.env.DRY_RUN_THRESHOLD, 10) : 0,
         enablePushProtection: args['enable-push-protection'] ?? false,
         noChangePushProtection: args['no-change-push-protection'] ?? false,
         disablePushProtection: args['disable-push-protection'] ?? false,
@@ -140,7 +140,33 @@ function parseArgs() {
     }
     return config;
 }
-async function login(server) {
+async function goto(page, url, config) {
+    while (true) {
+        try {
+            const result = await page.goto(url);
+            if (!result || !result.ok()) {
+                console.warn(`Failed to load page: ${result?.status() || 'unknown error'}`);
+                return false;
+            }
+            break;
+        }
+        catch (err) {
+            const error = err;
+            if (error.message.startsWith('net::ERR')) {
+                if (config.debug) {
+                    console.warn(chalk.yellow(`⚠️ Network error occurred while loading page: ${error.message}`));
+                }
+                continue;
+            }
+            else {
+                console.error(chalk.red(`⨯ Error loading page: ${error.message}`));
+                return false;
+            }
+        }
+    }
+    return true;
+}
+async function login(server, config) {
     // look for existing state stored in .state file locally
     const stateFilePath = path.join(process.cwd(), '.state');
     try {
@@ -155,7 +181,13 @@ async function login(server) {
     const context = await browser.newContext();
     const page = await context.newPage();
     // Wait for user to log in
-    await page.goto(`${server}/login`);
+    const url = `${server}/login`;
+    const success = await goto(page, url, config);
+    if (!success) {
+        console.error(chalk.red('✖ Failed to load login page. Please check your server URL.'));
+        await browser.close();
+        return;
+    }
     console.log(chalk.blue(`🖥️ Please log in manually to GitHub on ${server}`));
     console.log(chalk.blue('⌨ Waiting for manual login... Press Enter once logged in'));
     // Wait for user input
@@ -174,9 +206,9 @@ async function downloadExistingPatterns(context, config) {
     try {
         const url_path = config.scope !== 'enterprise' ? 'settings/security_analysis' : 'settings/security_analysis_policies/security_features';
         const url = buildUrl(config, url_path);
-        const result = await page.goto(url);
-        if (!result || !result.ok()) {
-            console.error(`Failed to load page: ${result?.status() || 'unknown error'}`);
+        const success = await goto(page, url, config);
+        if (!success) {
+            console.error(chalk.red(`⨯ Failed to load existing patterns`));
             return;
         }
         let keepGoing = true;
@@ -226,9 +258,9 @@ async function downloadExistingPatterns(context, config) {
                     progressBarSimple.increment();
                     // now get the content of the URL, by loading it and extracting it from the page
                     const patternPage = await context.newPage();
-                    const result = await patternPage.goto(`${config.server}${url}`);
-                    if (!result || !result.ok()) {
-                        console.warn(`Failed to load pattern page: ${result?.status() || 'unknown error'}`);
+                    const success = await goto(patternPage, `${config.server}${url}`, config);
+                    if (!success) {
+                        console.error(chalk.red(`⨯ Failed to load pattern page`));
                         continue;
                     }
                     await patternPage.waitForLoadState('load');
@@ -541,9 +573,9 @@ async function findExistingPatternByName(context, config, patternName) {
     try {
         const url_path = config.scope !== 'enterprise' ? 'settings/security_analysis' : 'settings/security_analysis_policies/security_features';
         const url = buildUrl(config, url_path);
-        const result = await page.goto(url);
-        if (!result || !result.ok()) {
-            console.warn(`Failed to load security analysis page: ${result?.status() || 'unknown error'}`);
+        const success = await goto(page, url, config);
+        if (!success) {
+            console.error(chalk.red(`⨯ Failed to load security analysis page`));
             return null;
         }
         let keepGoing = true;
@@ -554,7 +586,7 @@ async function findExistingPatternByName(context, config, patternName) {
             while (busy) {
                 busy = await customPatternList.getAttribute('busy') !== null;
             }
-            // wait a little longer to ensure the table is fully loaded
+            // wait a little to ensure the table is fully loaded
             await page.waitForTimeout(200);
             if (!customPatternList) {
                 console.warn(chalk.yellow('⚠️ No custom patterns found on the page'));
@@ -635,7 +667,11 @@ async function processPattern(context, config, pattern) {
             url = buildUrl(config, url_path);
         }
         // Navigate to pattern page (new or existing)
-        await page.goto(url);
+        const success = await goto(page, url, config);
+        if (!success) {
+            console.warn(`Failed to load custom pattern page`);
+            return;
+        }
         await page.waitForLoadState('load');
         const needToSubmit = await fillInPattern(page, pattern, !!existingPatternUrl, config);
         if (needToSubmit) {
@@ -777,7 +813,11 @@ async function clickAndWaitForRedirect(page, button, config) {
         // Check if the response indicates a redirect
         if (response.status() >= 300 && response.status() < 400) {
             const redirectUrl = response.headers()['location'];
-            await page.goto(redirectUrl);
+            const success = await goto(page, redirectUrl, config);
+            if (!success) {
+                console.error(chalk.red(`⨯ Failed to navigate to redirect URL: ${redirectUrl}`));
+                throw new Error(`Failed to navigate to redirect URL: ${redirectUrl}`);
+            }
         }
         else {
             console.warn(chalk.yellow(`⚠️ Button click did not result in a redirect. Status: ${response.status()}`));
@@ -1073,7 +1113,11 @@ async function togglePushProtectionConfig(page, pattern, config, enablePushProte
     const url = buildUrl(config, 'settings/security_analysis/pattern_configurations');
     let tableRow = undefined;
     while (true) {
-        await page.goto(url);
+        const success = await goto(page, url, config);
+        if (!success) {
+            console.error(chalk.red(`⨯ Failed to navigate to push protection configuration page: ${url}`));
+            throw new Error(`Failed to navigate to push protection configuration page: ${url}`);
+        }
         await page.waitForLoadState('load');
         // click on the "Custom" tab to show the custom patterns
         const tabNav = page.locator('nav[aria-label="Table selector"]');
