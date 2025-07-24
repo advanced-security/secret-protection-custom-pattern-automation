@@ -557,12 +557,22 @@ async function findExistingPatternByName(context, config, patternName) {
             // wait a little longer to ensure the table is fully loaded
             await page.waitForTimeout(200);
             if (!customPatternList) {
-                console.warn('No custom patterns found on the page');
+                console.warn(chalk.yellow('⚠️ No custom patterns found on the page'));
                 return null;
             }
-            const patternRows = await customPatternList.locator('li[class="Box-row"]').all();
+            let patternRows = [];
+            try {
+                patternRows = await customPatternList.locator('li[class="Box-row"]').all();
+            }
+            catch (error) {
+                if (config.debug) {
+                    console.log(chalk.blue(`Waiting for custom pattern list to be stable, trying again: ${error}`));
+                }
+                // did page reload? try again
+                continue;
+            }
             if (!patternRows || patternRows.length === 0) {
-                console.warn('No existing patterns found');
+                console.warn(chalk.yellow('⚠️ No existing patterns found'));
                 return null;
             }
             // Check each pattern on this page
@@ -588,7 +598,13 @@ async function findExistingPatternByName(context, config, patternName) {
         return null;
     }
     catch (error) {
-        console.warn(`Error checking for existing patterns: ${error}`);
+        console.error(chalk.red(`⨯ Error checking for existing patterns: ${error}`));
+        if (config.debug) {
+            // take screenshot
+            const screenshotPath = path.join(process.cwd(), `debug-check_existing_patterns_error_screenshot_${Date.now()}.png`);
+            await page.screenshot({ path: screenshotPath });
+            console.log(`📸 Screenshot saved to ${screenshotPath}`);
+        }
         return null;
     }
     finally {
@@ -733,7 +749,8 @@ async function testPattern(page, pattern, config) {
             }
             return false;
         }
-        console.log(chalk.green(`✓ Pattern test passed with text: ${testSuccess}`));
+        const matchCount = testSuccess.match(/\s*- (\d+) match(?:es)?\s*$/)?.[1] || '0';
+        console.log(chalk.green(`✓ Pattern test passed with ${matchCount} match${matchCount === '1' ? '' : 'es'}`));
     }
     return true;
 }
@@ -858,7 +875,9 @@ async function performDryRun(page, pattern, config) {
                 }
                 // Select specific repositories
                 for (let repo of config.dryRunRepoList) {
-                    console.log(chalk.blue(`Selecting repository for dry run: ${repo}`));
+                    if (config.debug) {
+                        console.log(chalk.blue(`Selecting repository for dry run: ${repo}`));
+                    }
                     // if it has a `/` in it, we assume it's a full repository name like `org/repo`, and at the org level, split off just the repo name
                     if (config.scope === 'org' && repo.includes('/')) {
                         repo = repo.split('/', 2)[1];
@@ -874,16 +893,18 @@ async function performDryRun(page, pattern, config) {
                     let found = false;
                     for (const option of repoOptions) {
                         const optionLabel = (await option.locator('span.ActionListItem-label').textContent())?.trim();
-                        console.log(chalk.gray(`Checking repository option: ${optionLabel}`));
+                        if (config.debug) {
+                            console.log(chalk.gray(`Checking repository option: ${optionLabel}`));
+                        }
                         if (optionLabel === repo) {
                             await option.click();
                             found = true;
-                            console.log(chalk.blue(`Selected repository: ${repo}`));
+                            console.log(chalk.blue(`Selected dry-run repository: ${repo}`));
                             break;
                         }
                     }
                     if (!found) {
-                        console.warn(chalk.yellow(`Repository "${repo}" not found in the dropdown`));
+                        console.warn(chalk.yellow(`Repository "${repo}" not found in the dry-run dropdown`));
                     }
                 }
                 // check if we have any selected repositories
@@ -906,14 +927,13 @@ async function performDryRun(page, pattern, config) {
     }
     // Extract pattern ID from the URL for tracking - split at / and pick final entry, then split at ? and pick first part
     const patternId = page.url().split('/').pop()?.split('?', 2)[0];
-    console.log(chalk.blue(`Pattern ID: ${patternId}`));
     if (!patternId || patternId.length === 0 || patternId === 'new') {
         console.error(chalk.red('✖ Failed to retrieve pattern ID from the URL'));
         throw new Error('Failed to retrieve pattern ID from the URL');
     }
     // Wait for dry run to complete with progress indicator
     let attempts = 0;
-    process.stdout.write(chalk.yellow('Waiting for dry run'));
+    process.stdout.write(chalk.yellow(`Waiting for dry run for ${pattern.name} (${patternId})... `));
     while (true) {
         try {
             // Check the dry-run status - a span with class f6, and the text "Status" is the header, and the next sibling is the status
@@ -944,6 +964,9 @@ async function performDryRun(page, pattern, config) {
         attempts++;
     }
     process.stdout.write('\n');
+    if (config.debug) {
+        console.log(chalk.blue(`ℹ Dry run completed after ${attempts} attempts`));
+    }
     // Get dry run results
     const results = await getDryRunResults(page);
     console.log(chalk.green(`✓ Dry run completed with ${results.count} matches`));
@@ -1048,33 +1071,40 @@ async function togglePushProtection(page, enable) {
 async function togglePushProtectionConfig(page, pattern, config, enablePushProtectionFlag) {
     // visit the push protection configuration page
     const url = buildUrl(config, 'settings/security_analysis/pattern_configurations');
-    await page.goto(url);
-    await page.waitForLoadState('load');
-    // click on the "Custom" tab to show the custom patterns
-    const tabNav = page.locator('nav[aria-label="Table selector"]');
-    const customTab = tabNav.locator('span[data-content="Custom"]').first();
-    await customTab.click();
-    // search for the pattern with the search box, using the `name:"..."` syntax
-    const inputSearchFilter = page.locator('input#pattern-configs-filter-input');
-    await inputSearchFilter.click();
-    await inputSearchFilter.fill(`name:"${pattern.name}"`);
-    // wait for the results to filter down
-    await page.waitForTimeout(200);
-    // find the pattern in the list
-    const tableRows = await page.locator('table > tbody > tr').all();
     let tableRow = undefined;
-    for (const row of tableRows) {
-        const nameCell = row.locator('td').first();
-        const nameText = (await nameCell.textContent())?.trim();
-        if (nameText === pattern.name) {
-            tableRow = row;
+    while (true) {
+        await page.goto(url);
+        await page.waitForLoadState('load');
+        // click on the "Custom" tab to show the custom patterns
+        const tabNav = page.locator('nav[aria-label="Table selector"]');
+        const customTab = tabNav.locator('span[data-content="Custom"]').first();
+        await customTab.click();
+        // search for the pattern with the search box, using the `name:"..."` syntax
+        const inputSearchFilter = page.locator('input#pattern-configs-filter-input');
+        await inputSearchFilter.click();
+        await inputSearchFilter.fill(`name:"${pattern.name}"`);
+        // wait for the results to filter down
+        await page.waitForTimeout(200);
+        // find the pattern in the list
+        const tableRows = await page.locator('table > tbody > tr').all();
+        for (const row of tableRows) {
+            const nameCell = row.locator('td').first();
+            const nameText = (await nameCell.textContent())?.trim();
+            if (nameText === pattern.name) {
+                tableRow = row;
+                break;
+            }
+        }
+        // if we didn't find the pattern, wait, try again, it might not be in the database yet
+        if (!tableRow) {
+            if (config.debug) {
+                console.log(chalk.gray(`Debug: Pattern "${pattern.name}" not found in push protection configuration`));
+            }
+            await page.waitForTimeout(2000); // wait a bit before retrying
+        }
+        else {
             break;
         }
-    }
-    // if we didn't find the pattern, exit
-    if (!tableRow) {
-        console.warn(chalk.yellow(`⚠️ Pattern "${pattern.name}" not found in push protection configuration`));
-        return;
     }
     // find the push protection toggle in the row
     const pushProtectionToggle = tableRow.locator('button[data-testid="push-protection-setting"]').first();
