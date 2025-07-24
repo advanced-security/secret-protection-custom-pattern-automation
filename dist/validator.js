@@ -59,13 +59,13 @@ export class PatternValidator {
             result.errors.push("Pattern regex is very short (less than 5 characters)");
         }
         if (pattern.regex?.version === undefined) {
-            result.warnings.push("Pattern version is not specified");
+            result.suggestions.push("Pattern version is not specified. Consider adding a version to track changes more precisely.");
         }
         if (pattern.regex?.start && !pattern.regex.start.trim()) {
-            result.warnings.push("Pattern start regex is empty");
+            result.suggestions.push("Pattern start regex is empty, so this will use the default start regex. Consider specifying a start regex for better accuracy.");
         }
         if (pattern.regex?.end && !pattern.regex.end.trim()) {
-            result.warnings.push("Pattern end regex is empty");
+            result.suggestions.push("Pattern end regex is empty, so this will use the default end regex. Consider specifying an end regex for better accuracy.");
         }
         // check that additional_match and additional_not_match are arrays
         if (pattern.regex?.additional_match && !Array.isArray(pattern.regex.additional_match)) {
@@ -89,7 +89,7 @@ export class PatternValidator {
             }
         }
         if (!pattern.test?.data) {
-            result.warnings.push("Pattern test data is missing");
+            result.suggestions.push("Pattern test data is missing. Having test data helps ensure the pattern works as expected.");
         }
     }
     static printValidationReport(result, patternName) {
