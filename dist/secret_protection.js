@@ -108,12 +108,6 @@ function parseArgs() {
     else {
         scope = args.scope;
     }
-    // check scope is valid
-    const validScopes = ['repo', 'org', 'enterprise'];
-    if (!validScopes.includes(scope)) {
-        console.error(chalk.red(`✖ Invalid scope: ${scope}. Valid scopes are: ${validScopes.join(', ')}`));
-        process.exit(1);
-    }
     // dry run threshold, from ENV or args - args win
     let dryRunThreshold = 0;
     if (process.env.DRY_RUN_THRESHOLD !== undefined) {
@@ -121,9 +115,6 @@ function parseArgs() {
     }
     if (args['dry-run-threshold'] !== undefined) {
         dryRunThreshold = parseInt(args['dry-run-threshold'], 10);
-    }
-    if (isNaN(dryRunThreshold) || dryRunThreshold < 0) {
-        dryRunThreshold = 0;
     }
     const dryRunRepoList = args['dry-run-repo'] ? (Array.isArray(args['dry-run-repo']) ? args['dry-run-repo'] : [args['dry-run-repo']]) : [];
     const config = {
@@ -146,6 +137,15 @@ function parseArgs() {
         dryRunAllRepos: args['dry-run-all-repos'] ?? false,
         dryRunRepoList: dryRunRepoList,
     };
+    // check scope is valid
+    const validScopes = ['repo', 'org', 'enterprise'];
+    if (!validScopes.includes(config.scope)) {
+        console.error(chalk.red(`✖ Invalid scope: ${config.scope}. Valid scopes are: ${validScopes.join(', ')}`));
+        process.exit(1);
+    }
+    if (isNaN(config.dryRunThreshold) || config.dryRunThreshold < 0) {
+        config.dryRunThreshold = 0;
+    }
     if ((!config.patterns || config.patterns.length === 0) && !config.downloadExisting && !config.deleteExisting) {
         console.warn(chalk.yellow('ℹ️  No patterns specified for upload. You can use --pattern to specify one or more pattern files.'));
         return undefined;
@@ -160,6 +160,10 @@ function parseArgs() {
     }
     if (config.disablePushProtection && config.noChangePushProtection) {
         console.warn(chalk.yellow('⚠️ Both --disable-push-protection and --no-change-push-protection are set. Choose one of them only.'));
+        return undefined;
+    }
+    if (config.scope === 'org' && !config.dryRunAllRepos && dryRunRepoList.length === 0) {
+        console.error(chalk.red('✖ No specific repositories provided for dry-run. To run dry-run on all repositories, use --dry-run-all-repos'));
         return undefined;
     }
     return config;
@@ -293,6 +297,9 @@ async function deleteExistingPatterns(context, config) {
                 return;
             }
         }
+        progressBar.stop();
+        // wait for a bit for the backend to catch up with the deletes
+        await page.waitForTimeout(1000);
     }
     finally {
         await page.close();
@@ -350,7 +357,6 @@ async function downloadExistingPatterns(context, config) {
             }
             const patternRows = await customPatternList.locator('li[class="Box-row"]').all();
             if (!patternRows || patternRows.length === 0) {
-                console.warn(chalk.yellow('No existing patterns found'));
                 progressBar.stop();
                 return;
             }
@@ -731,8 +737,7 @@ async function findExistingPatterns(context, config) {
                 continue;
             }
             if (!patternRows || patternRows.length === 0) {
-                console.warn(chalk.yellow('⚠️ No existing patterns found'));
-                return null;
+                return existingPatterns;
             }
             // Check each pattern on this page
             for (const row of patternRows) {
