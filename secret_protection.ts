@@ -7,10 +7,9 @@ import chalk from 'chalk';
 import Table from 'cli-table3';
 import inquirer from 'inquirer';
 import cliProgress from 'cli-progress';
+import { exit } from 'process';
 import { PatternValidator } from './validator.js';
 import { HELP_TEXT } from './cli.js';
-import { config, exit } from 'process';
-
 export interface Pattern {
     name: string;
     type?: string;
@@ -89,6 +88,7 @@ interface Config {
     disablePushProtection?: boolean;
     headless?: boolean;
     downloadExisting?: boolean;
+    deleteExisting?: boolean;
     validate?: boolean;
     validateOnly?: boolean;
     debug?: boolean;
@@ -154,6 +154,10 @@ export async function main() {
     try {
         if (config.downloadExisting) {
             await downloadExistingPatterns(context, config);
+        }
+
+        if (config.deleteExisting) {
+            await deleteExistingPatterns(context, config);
         }
 
         if (config.patterns && config.patterns.length > 0) {
@@ -224,7 +228,7 @@ function parseArgs(): Config | undefined {
         dryRunThreshold = 0;
     }
 
-    const dryRunRepoList = args['dry-run-repo-list'] ? (Array.isArray(args['dry-run-repo-list']) ? args['dry-run-repo-list'] : [args['dry-run-repo-list']]) : []
+    const dryRunRepoList = args['dry-run-repo'] ? (Array.isArray(args['dry-run-repo']) ? args['dry-run-repo'] : [args['dry-run-repo']]) : []
 
     const config = {
         server: args.server ?? process.env.GITHUB_SERVER ?? 'https://github.com',
@@ -239,6 +243,7 @@ function parseArgs(): Config | undefined {
         disablePushProtection: args['disable-push-protection'] ?? false,
         headless: args.headless ?? true,
         downloadExisting: args['download-existing'] ?? false,
+        deleteExisting: args['delete-existing'] ?? false,
         validateOnly: args['validate-only'] ?? false,
         validate: args.validate ?? true,
         debug: args.debug ?? false,
@@ -246,7 +251,7 @@ function parseArgs(): Config | undefined {
         dryRunRepoList: dryRunRepoList,
     };
 
-    if ((!config.patterns || config.patterns.length === 0) && !config.downloadExisting) {
+    if ((!config.patterns || config.patterns.length === 0) && !config.downloadExisting && !config.deleteExisting) {
         console.warn(chalk.yellow('ℹ️  No patterns specified for upload. You can use --pattern to specify one or more pattern files.'));
         return undefined;
     }
@@ -339,6 +344,100 @@ async function login(server: string, config: Config) {
     await browser.close();
 }
 
+async function deleteExistingPatterns(context: BrowserContext, config: Config): Promise<void> {
+    console.log('Deleting existing patterns...');
+    const page = await context.newPage();
+
+    try {
+        const url_path = config.scope !== 'enterprise' ? 'settings/security_analysis' : 'settings/security_analysis_policies/security_features';
+        const url = buildUrl(config, url_path);
+
+        const success = await goto(page, url, config);
+
+        if (!success) {
+            console.error(chalk.red(`⨯ Failed to load existing patterns`));
+            return;
+        }
+
+        const existingPatterns = await findExistingPatterns(context, config);
+
+        if (existingPatterns === null) {
+            console.error(chalk.red('✖ Failed to find existing patterns'));
+            return;
+        }
+
+        if (Array.from(existingPatterns.keys()).length === 0) {
+            return;
+        }
+
+        const deletedPatternNames: Set<string> = new Set();
+
+        const patternsToDelete: Array<[string, string]> = Array.from(existingPatterns.entries()).filter(([name, _url]) => {
+            return (config.patternsToInclude ? config.patternsToInclude.includes(name) : true) &&
+                !(config.patternsToExclude && config.patternsToExclude.includes(name));
+        });
+
+        if (patternsToDelete.length === 0) {
+            console.log(chalk.blue('ℹ No patterns to delete based on include/exclude filters'));
+            return;
+        }
+
+        // progress bar
+        const progressBar = new cliProgress.MultiBar({}, cliProgress.Presets.shades_classic);
+        const progressBarSimple = progressBar.create(patternsToDelete.length, 0);
+
+        for (const [name, url] of patternsToDelete) {
+            try {
+                const id = url.split('/').pop()?.split('?')[0] || '';
+
+                // now get the content of the URL, by loading it and extracting it from the page
+                const patternPage = await context.newPage();
+                const success = await goto(patternPage, `${config.server}${url}`, config);
+                if (!success) {
+                    progressBar.log(chalk.red(`⨯ Failed to load pattern page`));
+                    progressBarSimple.increment();
+                    continue;
+                }
+
+                await patternPage.waitForLoadState('load');
+
+                // show delete dialog - Playwright has trouble clicking the button
+                const confirmDialog = await showDialog(patternPage, `remove-pattern-dialog-pattern-${id}`);
+
+                if (!confirmDialog) {
+                    progressBar.log(chalk.yellow(`⚠️ No confirmation dialog found for pattern "${name}"`));
+                    progressBarSimple.increment();
+                    continue;
+                }
+
+                // TODO: pick between deleting and closing alerts, and by default confirm delete
+
+                const confirmDeleteSelector = `button[data-close-dialog-id="remove-pattern-dialog-pattern-${id}"][type="submit"]`;
+                const confirmDeleteButton = confirmDialog.locator(confirmDeleteSelector);
+
+                if (!confirmDeleteButton) {
+                    progressBar.log(chalk.yellow(`⚠️ No confirm delete button found for pattern "${name}"`));
+                    progressBarSimple.increment();
+                    continue;
+                }
+
+                await confirmDeleteButton.click();
+
+                deletedPatternNames.add(name);
+
+                progressBarSimple.increment();
+            } catch (err) {
+                const error = err as Error;
+                console.error(chalk.red(`✖ Error when deleting existing pattern: ${error.message}`));
+                progressBar.stop();
+                return;
+            }
+        }
+    } finally {
+        await page.close();
+    }
+}
+
 async function downloadExistingPatterns(context: BrowserContext, config: Config): Promise<void> {
     console.log('Downloading existing patterns...');
     const page = await context.newPage();
@@ -378,14 +477,22 @@ async function downloadExistingPatterns(context: BrowserContext, config: Config)
             await page.waitForTimeout(200);
 
             if (!customPatternList) {
-                console.warn('No custom patterns found on the page');
+                progressBar.stop();
+                console.warn(chalk.yellow('⚠️ No custom patterns found on the page'));
+                return;
+            }
+
+            if ((await customPatternList.textContent())?.includes('There are no custom patterns for this repository')) {
+                progressBar.stop();
+                console.log(chalk.blue('ℹ No custom patterns exist on this repository'));
                 return;
             }
 
             const customPatternCount = await customPatternList.locator('.js-custom-pattern-total-count').first().textContent();
 
             if (!customPatternCount) {
-                console.warn('No custom patterns found on the page');
+                progressBar.stop();
+                console.warn(chalk.yellow('⚠️ No custom pattern count found on the page'));
                 return;
             }
 
@@ -538,6 +645,17 @@ async function uploadPatterns(context: BrowserContext, config: Config): Promise<
 
     const unprocessedPatterns: Map<string, [string, string][]> = new Map();
 
+    const existingPatterns = await findExistingPatterns(context, config);
+
+    if (existingPatterns === null) {
+        console.error(chalk.red('✖ Failed to find existing patterns'));
+        return;
+    }
+
+    if (config.debug) {
+        console.log(chalk.blue(`Debug: Found ${Array.from(existingPatterns.entries()).length} existing patterns`));
+    }
+
     for (const patternPath of config.patterns) {
         try {
             console.log(`Processing pattern file: ${patternPath}`);
@@ -549,17 +667,17 @@ async function uploadPatterns(context: BrowserContext, config: Config): Promise<
 
             for (const pattern of patternFile.patterns) {
                 if (config.patternsToInclude && !config.patternsToInclude.includes(pattern.name)) {
-                    console.log(`Skipping pattern ${pattern.name} as it is not in the include list`);
+                    console.log(`Skipping pattern ${pattern.name} not in the include list`);
                     continue;
                 }
 
                 if (config.patternsToExclude && config.patternsToExclude.includes(pattern.name)) {
-                    console.log(`Skipping pattern ${pattern.name} as it is in the exclude list`);
+                    console.log(`Skipping pattern ${pattern.name} in the exclude list`);
                     continue;
                 }
 
                 try {
-                    await processPattern(context, config, pattern);
+                    await processPattern(context, config, pattern, existingPatterns);
                 } catch (err) {
                     const error = err as Error;
                     console.error(chalk.red(`✖ Failed to process pattern ${pattern.name ?? "**unnamed pattern**"} in file ${patternPath}:`, error.message));
@@ -785,9 +903,9 @@ async function fillInPattern(page: Page, pattern: Pattern, isExisting: boolean =
     return true;
 }
 
-// TODO: cache the names we have already seen, so we don't have to keep checking - and store any newly created name/id pairs as we go, too
-async function findExistingPatternByName(context: BrowserContext, config: Config, patternName: string): Promise<string | null> {
+async function findExistingPatterns(context: BrowserContext, config: Config): Promise<Map<string, string> | null> {
     const page = await context.newPage();
+    const existingPatterns: Map<string, string> = new Map();
 
     try {
         const url_path = config.scope !== 'enterprise' ? 'settings/security_analysis' : 'settings/security_analysis_policies/security_features';
@@ -816,8 +934,13 @@ async function findExistingPatternByName(context: BrowserContext, config: Config
             await page.waitForTimeout(200);
 
             if (!customPatternList) {
-                console.warn(chalk.yellow('⚠️ No custom patterns found on the page'));
+                console.warn(chalk.yellow('⚠️ No custom pattern list found on the page'));
                 return null;
+            }
+
+            if ((await customPatternList.textContent())?.includes('There are no custom patterns for this repository')) {
+                console.log(chalk.blue('ℹ No custom patterns exist on this repository'));
+                return existingPatterns;
             }
 
             let patternRows: Locator[] = [];
@@ -842,10 +965,14 @@ async function findExistingPatternByName(context: BrowserContext, config: Config
                 const link = row.locator('.js-navigation-open').first();
                 if (link) {
                     const name = await link.textContent();
-                    if (name?.trim() === patternName) {
-                        const url = await link.getAttribute('href');
-                        return url;
+                    const url = await link.getAttribute('href');
+
+                    if (!name || !url) {
+                        console.warn(chalk.yellow('⚠️ No name or URL found for pattern'));
+                        continue;
                     }
+
+                    existingPatterns.set(name, url);
                 }
             }
 
@@ -858,7 +985,7 @@ async function findExistingPatternByName(context: BrowserContext, config: Config
             }
         }
 
-        return null;
+        return existingPatterns;
 
     } catch (error) {
         console.error(chalk.red(`⨯ Error checking for existing patterns: ${error}`));
@@ -875,7 +1002,7 @@ async function findExistingPatternByName(context: BrowserContext, config: Config
 }
 
 // TODO: catch errors/warnings after each step and log them, or stop on error
-async function processPattern(context: BrowserContext, config: Config, pattern: Pattern): Promise<void> {
+async function processPattern(context: BrowserContext, config: Config, pattern: Pattern, existingPatterns: Map<string, string>): Promise<void> {
     console.log(chalk.bold(`\n🔄 Processing pattern: ${pattern.name}`));
 
     // fill in some defaults if parts are missing
@@ -890,7 +1017,7 @@ async function processPattern(context: BrowserContext, config: Config, pattern: 
 
     try {
         // Look at existing patterns to see if one matches this pattern name
-        const existingPatternUrl = await findExistingPatternByName(context, config, pattern.name);
+        const existingPatternUrl = existingPatterns.get(pattern.name);
 
         let url: string;
         if (existingPatternUrl) {
@@ -923,7 +1050,7 @@ async function processPattern(context: BrowserContext, config: Config, pattern: 
             }
 
             // Perform dry run
-            const dryRunResult = await performDryRun(page, pattern, config);
+            const dryRunResult = await performDryRun(page, pattern, config, !existingPatternUrl);
 
             // Interactive confirmation based on results
             const shouldProceed = await confirmPatternAction(pattern, dryRunResult, config);
@@ -938,6 +1065,8 @@ async function processPattern(context: BrowserContext, config: Config, pattern: 
 
             const action = existingPatternUrl ? 'Updated' : 'Published';
             console.log(chalk.green(`✓ ${action} pattern`));
+
+            existingPatterns.set(pattern.name, page.url());
         } else {
             // publish if the pattern is not already published - we have a pattern there that matches our upload and is unpublished
             // if the title is "Unpublished pattern", we can assume it is unpublished
@@ -1109,12 +1238,26 @@ async function clickAndWaitForRedirect(page: Page, button: Locator, config: Conf
     }
 }
 
-async function performDryRun(page: Page, pattern: Pattern, config: Config): Promise<DryRunResult> {
+async function showDialog(page: Page, dialogId: string): Promise<Locator> {
+    const dialog = page.locator(`dialog#${dialogId}`);
+    dialog.evaluate((el: HTMLDialogElement) => {
+        if (!el.open) {
+            el.showModal();
+        }
+    });
+
+    // Wait for the dialog to appear
+    await dialog.waitFor({ state: 'visible' });
+
+    return dialog;
+}
+
+async function performDryRun(page: Page, pattern: Pattern, config: Config, newPattern: boolean): Promise<DryRunResult> {
     // Wait for the dry run button to be enabled
-    // repo level class: js-save-and-dry-run-button
+    // repo level class: js-save-and-dry-run-button or js-custom-pattern-submit-button if new
     // org level class: js-repo-selector-dialog-summary-button
 
-    const selectorClass = config.scope === 'repo' ? 'js-save-and-dry-run-button' : 'js-repo-selector-dialog-summary-button';
+    const selectorClass = config.scope === 'repo' ? (newPattern ? 'js-custom-pattern-submit-button' : 'js-save-and-dry-run-button') : 'js-repo-selector-dialog-summary-button';
 
     const dryRunButton = page.locator(`button.${selectorClass}`).first();
     let buttonID: string | null | undefined = null;
@@ -1169,15 +1312,8 @@ async function performDryRun(page: Page, pattern: Pattern, config: Config): Prom
             // Emulate clicking the button to open the repo selector dialog
             // Playwright struggles with this click, so we need to directly trigger the dialog
             // we need to change the dialog state to 'open', using the dialog 'repo-selector-dialog'
-            const dialog = page.locator('dialog#repo-selector-dialog');
-            dialog.evaluate((el: HTMLDialogElement) => {
-                if (!el.open) {
-                    el.showModal();
-                }
-            });
-
             // Wait for the dialog to appear
-            await dialog.waitFor({ state: 'visible' });
+            const dialog = await showDialog(page, 'repo-selector-dialog');
 
             // Select all repositories if we're in org mode and dryRunAllRepos is true
             if (config?.dryRunAllRepos && config.scope === 'org') {
