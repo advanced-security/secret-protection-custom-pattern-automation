@@ -71,6 +71,9 @@ export async function main() {
 function parseArgs() {
     const args = minimist(process.argv.slice(2));
     const target = args._.pop();
+    const patterns = args.pattern ? (Array.isArray(args.pattern) ? args.pattern : [args.pattern]) : undefined;
+    const include_patterns = args['include-pattern-name'] ? (Array.isArray(args['include-pattern-name']) ? args['include-pattern-name'] : [args['include-pattern-name']]) : undefined;
+    const exclude_patterns = args['exclude-pattern-name'] ? (Array.isArray(args['exclude-pattern-name']) ? args['exclude-pattern-name'] : [args['exclude-pattern-name']]) : undefined;
     // For validate-only mode, target can be a placeholder
     if (args['validate-only']) {
         console.log(chalk.yellow('ℹ️  Running validation-only mode without target specification'));
@@ -78,7 +81,9 @@ function parseArgs() {
             server: 'https://github.com',
             target: 'validation-only',
             scope: 'repo',
-            patterns: args.pattern ? (Array.isArray(args.pattern) ? args.pattern : [args.pattern]) : undefined,
+            patterns: patterns,
+            patternsToInclude: include_patterns,
+            patternsToExclude: exclude_patterns,
             validateOnly: true,
             validate: true,
             dryRunAllRepos: true,
@@ -106,12 +111,26 @@ function parseArgs() {
         console.error(chalk.red(`✖ Invalid scope: ${scope}. Valid scopes are: ${validScopes.join(', ')}`));
         process.exit(1);
     }
+    // dry run threshold, from ENV or args - args win
+    let dryRunThreshold = 0;
+    if (process.env.DRY_RUN_THRESHOLD !== undefined) {
+        dryRunThreshold = parseInt(process.env.DRY_RUN_THRESHOLD, 10);
+    }
+    if (args['dry-run-threshold'] !== undefined) {
+        dryRunThreshold = parseInt(args['dry-run-threshold'], 10);
+    }
+    if (isNaN(dryRunThreshold) || dryRunThreshold < 0) {
+        dryRunThreshold = 0;
+    }
+    const dryRunRepoList = args['dry-run-repo-list'] ? (Array.isArray(args['dry-run-repo-list']) ? args['dry-run-repo-list'] : [args['dry-run-repo-list']]) : [];
     const config = {
         server: args.server ?? process.env.GITHUB_SERVER ?? 'https://github.com',
         target,
         scope,
-        patterns: args.pattern ? (Array.isArray(args.pattern) ? args.pattern : [args.pattern]) : undefined,
-        dryRunThreshold: process.env.DRY_RUN_THRESHOLD ? parseInt(process.env.DRY_RUN_THRESHOLD, 10) : 0,
+        patterns: patterns,
+        patternsToInclude: include_patterns,
+        patternsToExclude: exclude_patterns,
+        dryRunThreshold: dryRunThreshold,
         enablePushProtection: args['enable-push-protection'] ?? false,
         noChangePushProtection: args['no-change-push-protection'] ?? false,
         disablePushProtection: args['disable-push-protection'] ?? false,
@@ -121,7 +140,7 @@ function parseArgs() {
         validate: args.validate ?? true,
         debug: args.debug ?? false,
         dryRunAllRepos: args['dry-run-all-repos'] ?? false,
-        dryRunRepoList: args['dry-run-repo-list'] ? (Array.isArray(args['dry-run-repo-list']) ? args['dry-run-repo-list'] : [args['dry-run-repo-list']]) : [],
+        dryRunRepoList: dryRunRepoList,
     };
     if ((!config.patterns || config.patterns.length === 0) && !config.downloadExisting) {
         console.warn(chalk.yellow('ℹ️  No patterns specified for upload. You can use --pattern to specify one or more pattern files.'));
@@ -365,6 +384,14 @@ async function uploadPatterns(context, config) {
                 validatePatterns(patternFile);
             }
             for (const pattern of patternFile.patterns) {
+                if (config.patternsToInclude && !config.patternsToInclude.includes(pattern.name)) {
+                    console.log(`Skipping pattern ${pattern.name} as it is not in the include list`);
+                    continue;
+                }
+                if (config.patternsToExclude && config.patternsToExclude.includes(pattern.name)) {
+                    console.log(`Skipping pattern ${pattern.name} as it is in the exclude list`);
+                    continue;
+                }
                 try {
                     await processPattern(context, config, pattern);
                 }
