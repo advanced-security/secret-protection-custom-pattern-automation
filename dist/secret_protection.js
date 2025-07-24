@@ -353,7 +353,7 @@ async function uploadPatterns(context, config) {
         }
     }
     if (unprocessedPatterns.size > 0) {
-        console.log(chalk.yellow('\n⚠️ Some patterns could not be processed:'));
+        console.log(chalk.yellow('\n⚠️  Some patterns could not be processed:'));
         for (const [filePath, patterns] of unprocessedPatterns.entries()) {
             console.log(chalk.yellow(`\nFile: ${filePath}`));
             for (const [patternName, errorMessage] of patterns) {
@@ -532,7 +532,7 @@ async function fillInPattern(page, pattern, isExisting = false, _config) {
             await addAdditionalRule(page, rule, 'must_not_match', index + offset);
         }
     }
-    console.log(chalk.green(`✓ Pattern information filled successfully`));
+    console.log(chalk.green(`✓ Pattern filled in`));
     return true;
 }
 // TODO: cache the names we have already seen, so we don't have to keep checking - and store any newly created name/id pairs as we go, too
@@ -933,7 +933,7 @@ async function performDryRun(page, pattern, config) {
     }
     // Wait for dry run to complete with progress indicator
     let attempts = 0;
-    process.stdout.write(chalk.yellow(`Waiting for dry run for ${pattern.name} (${patternId})... `));
+    process.stdout.write(chalk.yellow(`⏳ Waiting for dry run (pattern ${patternId})...`));
     while (true) {
         try {
             // Check the dry-run status - a span with class f6, and the text "Status" is the header, and the next sibling is the status
