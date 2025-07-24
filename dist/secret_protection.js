@@ -33,7 +33,7 @@ export async function main() {
             try {
                 console.log(chalk.blue(`\n📁 Loading pattern file: ${patternPath}`));
                 const patternFile = await loadPatternFile(patternPath);
-                validatePatterns(patternFile);
+                validatePatterns(patternFile, config);
             }
             catch (error) {
                 console.error(chalk.red(`✖ Validation failed for ${patternPath}:`), error);
@@ -474,7 +474,7 @@ async function uploadPatterns(context, config) {
             console.log(`Processing pattern file: ${patternPath}`);
             const patternFile = await loadPatternFile(patternPath);
             if (config.validate) {
-                validatePatterns(patternFile);
+                validatePatterns(patternFile, config);
             }
             for (const pattern of patternFile.patterns) {
                 if (config.patternsToInclude && !config.patternsToInclude.includes(pattern.name)) {
@@ -532,16 +532,15 @@ async function loadPatternFile(filePath) {
         }
     }
 }
-function validatePatterns(patternFile) {
+function validatePatterns(patternFile, config) {
     const fileResult = PatternValidator.validatePatternFile(patternFile);
-    if (fileResult.isValid) {
+    if (fileResult.isValid && !config.validateOnly) {
         console.log(chalk.green('✔ All patterns passed validation'));
     }
     else {
         PatternValidator.printValidationReport(fileResult);
-        throw new Error('Pattern validation failed');
     }
-    // Individual pattern validation for detailed reporting
+    // Individual pattern validation for summary reporting
     const patternResults = patternFile.patterns.map(pattern => ({
         name: pattern.name,
         result: PatternValidator.validatePattern(pattern)
@@ -550,6 +549,9 @@ function validatePatterns(patternFile) {
     const summaryTable = PatternValidator.createSummaryTable(patternResults);
     console.log('\n📊 Validation Summary:');
     console.log(summaryTable);
+    if (!fileResult.isValid) {
+        throw new Error('Pattern validation failed');
+    }
 }
 async function expandMoreOptions(page) {
     const optionsData = page.locator('div.Details-content--shown').first();
@@ -805,7 +807,6 @@ async function processPattern(context, config, pattern, existingPatterns) {
             // Test the pattern
             const testResult = await testPattern(page, pattern, config);
             if (!testResult) {
-                console.warn(chalk.red(`✖ Pattern test failed for ${pattern.name}, skipping upload`));
                 throw new Error(`Pattern test failed for ${pattern.name}`);
             }
             // Perform dry run
@@ -859,10 +860,6 @@ async function processPattern(context, config, pattern, existingPatterns) {
         const actionPast = existingPatternUrl ? 'updated' : 'created';
         console.log(chalk.green(`✓ Successfully ${actionPast} pattern: ${pattern.name}`));
     }
-    catch (error) {
-        console.error(chalk.red(`✖ Failed to process pattern "${pattern.name}":`, error));
-        throw error;
-    }
     finally {
         await page.close();
     }
@@ -900,7 +897,6 @@ async function testPattern(page, pattern, config) {
     }
     if (!ignoreTestResult) {
         if (!testSuccess?.match(/\s*- \d+ match(?:es)?\s*$/)) {
-            console.warn(chalk.red(`✖ Pattern test failed`));
             if (config?.debug) {
                 const screenshotPath = path.join(process.cwd(), `debug-test_failed_screenshot_${Date.now()}.png`);
                 // 50% zoom

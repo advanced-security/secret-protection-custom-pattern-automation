@@ -69,8 +69,16 @@ export class PatternValidator {
             result.warnings.push("Pattern name is very long (>100 characters)");
         }
 
-        if (!pattern.regex?.pattern?.trim()) {
+        if (pattern.regex?.pattern?.trim() === '' || !pattern.regex?.pattern) {
             result.errors.push("Pattern regex is required");
+        }
+
+        if (pattern.regex?.pattern.length === 1) {
+            result.errors.push("Pattern regex is very short (1 character)");
+        }
+
+        if (pattern.regex?.pattern.length < 5) {
+            result.errors.push("Pattern regex is very short (less than 5 characters)");
         }
 
         if (pattern.regex?.version === undefined) {
@@ -105,6 +113,10 @@ export class PatternValidator {
                 }
             }
         }
+
+        if (!pattern.test?.data) {
+            result.warnings.push("Pattern test data is missing");
+        }
     }
 
     public static printValidationReport(result: ValidationResult, patternName?: string): void {
@@ -112,10 +124,18 @@ export class PatternValidator {
 
         console.log(chalk.bold.underline(`\n${title}`));
 
-        if (result.isValid) {
-            console.log(chalk.green('✓ Pattern is valid'));
+        if (patternName) {
+            if (result.isValid) {
+                console.log(chalk.green('✓ Pattern is valid'));
+            } else {
+                console.log(chalk.red('✗ Pattern has errors'));
+            }
         } else {
-            console.log(chalk.red('✗ Pattern has errors'));
+            if (result.isValid) {
+                console.log(chalk.green('✓ All patterns are valid'));
+            } else {
+                console.log(chalk.red('✗ Some patterns have errors'));
+            }
         }
 
         if (result.errors.length > 0) {
