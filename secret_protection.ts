@@ -81,7 +81,7 @@ interface Config {
     target: string;
     scope: 'repo' | 'org' | 'enterprise';
     patterns?: string[];
-    dryRunThreshold?: number;
+    dryRunThreshold: number;
     enablePushProtection?: boolean;
     noChangePushProtection?: boolean;
     disablePushProtection?: boolean;
@@ -178,6 +178,7 @@ function parseArgs(): Config | undefined {
             validateOnly: true,
             validate: true,
             dryRunAllRepos: true,
+            dryRunThreshold: 0,
         };
     }
 
@@ -1509,7 +1510,7 @@ async function displayDryRunResults(results: { count: number; results: DryRunMat
 }
 
 async function confirmPatternAction(pattern: Pattern, dryRunResult: DryRunResult, config: Config): Promise<boolean> {
-    if (config.dryRunThreshold && dryRunResult.hits > config.dryRunThreshold) {
+    if (dryRunResult.hits > config.dryRunThreshold) {
         console.log(chalk.red(`\n✖ Pattern "${pattern.name}" exceeds dry run threshold (${dryRunResult.hits} > ${config.dryRunThreshold})`));
 
         const answer = await inquirer.prompt([{

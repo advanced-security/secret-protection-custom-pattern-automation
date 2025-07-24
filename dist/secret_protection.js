@@ -82,6 +82,7 @@ function parseArgs() {
             validateOnly: true,
             validate: true,
             dryRunAllRepos: true,
+            dryRunThreshold: 0,
         };
     }
     if (!target) {
@@ -1201,7 +1202,7 @@ async function displayDryRunResults(results) {
     console.log(chalk.blue('\n💡 Review these results to ensure they represent actual secrets, not false positives.'));
 }
 async function confirmPatternAction(pattern, dryRunResult, config) {
-    if (config.dryRunThreshold && dryRunResult.hits > config.dryRunThreshold) {
+    if (dryRunResult.hits > config.dryRunThreshold) {
         console.log(chalk.red(`\n✖ Pattern "${pattern.name}" exceeds dry run threshold (${dryRunResult.hits} > ${config.dryRunThreshold})`));
         const answer = await inquirer.prompt([{
                 type: 'confirm',
