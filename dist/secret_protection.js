@@ -152,16 +152,16 @@ async function goto(page, url, config) {
         }
         catch (err) {
             const error = err;
-            if (error.message.startsWith('net::ERR')) {
-                if (config.debug) {
-                    console.warn(chalk.yellow(`⚠️ Network error occurred while loading page: ${error.message}`));
+            if (error.message.startsWith('page.goto: net::ERR')) {
+                if (error.message.startsWith('page.goto: net::ERR_ABORTED')) {
+                    if (config.debug) {
+                        console.warn(chalk.yellow(`⚠️ Network error occurred while loading page: ${error.message}`));
+                    }
+                    continue;
                 }
-                continue;
             }
-            else {
-                console.error(chalk.red(`⨯ Error loading page: ${error.message}`));
-                return false;
-            }
+            console.error(chalk.red(`⨯ Error loading page: ${error.message}`));
+            return false;
         }
     }
     return true;
