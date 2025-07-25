@@ -676,45 +676,76 @@ async function fillInPattern(page, pattern, isExisting = false, config) {
             }
             else {
                 // check if the additional matches are already present on the page - if they all are, and there are no extra ones, then we didn't change anything
-                const existingAdditionalMatches = await page.locator('input[name="additional_match"]').all();
-                const existingNotMatches = await page.locator('input[name="additional_not_match"]').all();
-                if (existingAdditionalMatches.length === (pattern.regex.additional_match?.length ?? 0) && existingNotMatches.length === (pattern.regex.additional_not_match?.length ?? 0)) {
+                const existingAdditionalMatches = await page.locator('div.js-additional-secret-format').all();
+                if (existingAdditionalMatches.length === (pattern.regex.additional_match?.length ?? 0) + (pattern.regex.additional_not_match?.length ?? 0)) {
                     // Check if all existing matches are the same as the new ones
                     let allMatchesSame = true;
-                    for (let i = 0; i < existingAdditionalMatches.length; i++) {
-                        const currentValue = await existingAdditionalMatches[i].inputValue();
+                    let i = 0;
+                    for (i = 0; i < existingAdditionalMatches.length; i++) {
+                        const currentValue = await existingAdditionalMatches[i].locator('input[type="text"]').inputValue();
                         if (currentValue !== pattern.regex.additional_match?.[i]) {
+                            allMatchesSame = false;
+                            break;
+                        }
+                        // check this is an additional match, by looking at the radio button
+                        const radioButton = existingAdditionalMatches[i].locator('input[type="radio"][value="must_match"]');
+                        const isMustMatch = await radioButton.isChecked();
+                        if (!isMustMatch) {
                             allMatchesSame = false;
                             break;
                         }
                     }
                     if (!allMatchesSame) {
                         changed = true;
+                        if (config.debug) {
+                            console.log(chalk.blue(`✓ Existing additional matches differ from new ones, will clear all additional matches`));
+                        }
                     }
                     let allNotMatchesSame = true;
-                    for (let i = 0; i < existingNotMatches.length; i++) {
-                        const currentValue = await existingNotMatches[i].inputValue();
+                    for (; i < existingAdditionalMatches.length; i++) {
+                        const currentValue = await existingAdditionalMatches[i].locator('input[type="text"]').inputValue();
                         if (currentValue !== pattern.regex.additional_not_match?.[i]) {
+                            allNotMatchesSame = false;
+                            break;
+                        }
+                        // check this is an additional NOT match, by looking at the radio button
+                        const radioButton = existingAdditionalMatches[i].locator('input[type="radio"][value="must_not_match"]');
+                        const isMustNotMatch = await radioButton.isChecked();
+                        if (!isMustNotMatch) {
                             allNotMatchesSame = false;
                             break;
                         }
                     }
                     if (!allNotMatchesSame) {
                         changed = true;
+                        if (config.debug) {
+                            console.log(chalk.blue(`✓ Existing additional not matches differ from new ones, will clear all additional matches`));
+                        }
                     }
                 }
                 else {
                     changed = true;
                 }
-                for (const removeButton of removeExistingAdditionalMatches) {
-                    if (await removeButton.isVisible() && await removeButton.isEnabled()) {
-                        await removeButton.click();
+                if (changed || config.forceSubmission) {
+                    const removeExistingAdditionalMatchesSelector = 'button.js-remove-secret-format-button';
+                    if (config.debug) {
+                        console.log(chalk.blue(`Removing ${await page.locator(removeExistingAdditionalMatchesSelector).count()} existing additional matches`));
+                    }
+                    while (await page.locator(removeExistingAdditionalMatchesSelector).count() > 0) {
+                        const removeButton = page.locator(removeExistingAdditionalMatchesSelector).first();
+                        if (await removeButton.isVisible() && await removeButton.isEnabled()) {
+                            await removeButton.click();
+                            if (config.debug) {
+                                console.log(chalk.blue(`✓ Removed existing additional match rule`));
+                            }
+                            await page.waitForTimeout(100);
+                        }
                     }
                 }
             }
         }
         catch (error) {
-            console.log(chalk.gray(`Note: Could not clear all existing additional rules: ${error}`));
+            console.log(chalk.gray(`Note: Could not check/clear all existing additional rules: ${error}`));
         }
         if (!changed && !config.forceSubmission) {
             console.log(chalk.yellow(`⏩ No changes detected against existing pattern, skipping submission`));
@@ -722,36 +753,78 @@ async function fillInPattern(page, pattern, isExisting = false, config) {
         }
     }
     else {
-        await page.fill('input[name="display_name"]', pattern.name);
+        const nameField = page.locator('input[name="display_name"]');
+        await nameField.pressSequentially(pattern.name);
     }
     if (pattern.regex.start || pattern.regex.end || pattern.regex.additional_match || pattern.regex.additional_not_match) {
         await expandMoreOptions(page);
     }
     const secretFormat = page.locator('input[name="secret_format"]');
+    await secretFormat.clear();
     await secretFormat.click();
-    await secretFormat.fill(pattern.regex.pattern);
+    await secretFormat.pressSequentially(pattern.regex.pattern);
     if (pattern.regex.start) {
         const beforeSecretInput = page.locator('input[name="before_secret"]');
+        await beforeSecretInput.clear();
         await beforeSecretInput.click();
-        await beforeSecretInput.fill(pattern.regex.start);
+        await beforeSecretInput.pressSequentially(pattern.regex.start);
     }
     if (pattern.regex.end) {
         const afterSecretInput = page.locator('input[name="after_secret"]');
         await afterSecretInput.click();
-        await afterSecretInput.fill(pattern.regex.end);
+        await afterSecretInput.clear();
+        await afterSecretInput.pressSequentially(pattern.regex.end);
     }
     if (pattern.regex.additional_match && pattern.regex.additional_match.length > 0) {
         for (const [index, rule] of pattern.regex.additional_match.entries()) {
-            await addAdditionalRule(page, rule, 'must_match', index);
+            const success = await addAdditionalRule(page, rule, 'must_match', index, config);
+            if (!success) {
+                console.error(chalk.red(`⨯ Failed to add additional match rule ${index} for ${rule}`));
+                return false;
+            }
+            else {
+                if (config.debug) {
+                    console.log(chalk.blue(`✓ Added additional match rule ${index}: ${rule}`));
+                }
+            }
         }
     }
     if (pattern.regex.additional_not_match && pattern.regex.additional_not_match.length > 0) {
         for (const [index, rule] of pattern.regex.additional_not_match.entries()) {
             const offset = pattern.regex.additional_match?.length || 0;
-            await addAdditionalRule(page, rule, 'must_not_match', index + offset);
+            const success = await addAdditionalRule(page, rule, 'must_not_match', index + offset, config);
+            if (!success) {
+                console.error(chalk.red(`⨯ Failed to add additional not match rule ${index + offset} for ${rule}`));
+                return false;
+            }
+            else {
+                if (config.debug) {
+                    console.log(chalk.blue(`✓ Added additional not match rule ${index + offset}: ${rule}`));
+                }
+            }
         }
     }
+    // click away from entries
+    await page.locator('body').click();
+    // pause briefly
+    await page.waitForTimeout(200);
+    // look for errors
+    const errorExists = await page.locator('p.error').count() !== 0 || await page.locator('div.errored').count() !== 0;
+    if (errorExists) {
+        const errorMessage = await page.locator('p.error').first().textContent();
+        const fieldName = await page.locator('div.errored').first().locator('input').first().getAttribute('aria-label');
+        console.error(chalk.red(`⨯ Error in field "${fieldName}": ${errorMessage}`));
+        return false;
+    }
     console.log(chalk.green(`✓ Pattern filled in`));
+    if (config.debug) {
+        // take a screenshot of the filled in pattern
+        // make screen quite big
+        await page.setViewportSize({ width: 1920, height: 2000 });
+        const screenshotPath = path.join(process.cwd(), `debug-filled_pattern_${pattern.name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.png`);
+        await page.screenshot({ path: screenshotPath });
+        console.log(`📸 Screenshot of filled pattern saved to ${screenshotPath}`);
+    }
     return true;
 }
 async function findExistingPatterns(context, config) {
@@ -852,7 +925,8 @@ async function processPattern(context, config, pattern, existingPatterns) {
         let url;
         if (existingPatternUrl) {
             url = `${config.server}${existingPatternUrl}`;
-            console.log(chalk.blue(`🔍 Found existing pattern`));
+            const id = existingPatternUrl.split('/').pop()?.split('?')[0] || '';
+            console.log(chalk.blue(`🔍 Found existing pattern: ${id}`));
         }
         else {
             const url_path = config.scope !== 'enterprise' ? 'settings/security_analysis/custom_patterns/new' : 'settings/advanced_security/custom_patterns/new';
@@ -963,9 +1037,19 @@ async function testPattern(page, pattern, config) {
             console.log(chalk.blue(`🔄 Test data: ${pattern.test.data}`));
         }
         tries++;
-        if (tries > 100) {
+        if (tries > 50) {
             console.warn(chalk.yellow(`⚠️  Pattern test is taking longer than expected...`));
             break;
+        }
+    }
+    if (testSuccess?.includes(' - Finding matches..')) {
+        // look for errors
+        const errorExists = await page.locator('p.error').count() !== 0;
+        if (errorExists) {
+            const errorMessage = await page.locator('p.error').first().textContent();
+            const fieldName = await page.locator('div.errored').first().locator('input').first().getAttribute('aria-label');
+            console.error(chalk.red(`⨯ Error in field "${fieldName}": ${errorMessage}`));
+            return false;
         }
     }
     if (!ignoreTestResult) {
@@ -987,18 +1071,55 @@ async function testPattern(page, pattern, config) {
     }
     return true;
 }
-async function addAdditionalRule(page, rule, type, index) {
+async function addAdditionalRule(page, rule, type, index, config) {
+    if (config.debug) {
+        // Take a screenshot if debugging
+        // make screen quite big
+        await page.setViewportSize({ width: 1920, height: 2000 });
+        console.log(chalk.blue(`Taking screenshot of before state for post_processing_${index}`));
+        const screenshotPath = path.join(process.cwd(), `debug-additional_rule_input_${index}_before_screenshot_${Date.now()}.png`);
+        await page.screenshot({ path: screenshotPath });
+        console.log(chalk.blue(`📸 Screenshot saved to: ${screenshotPath}`));
+    }
     // Click add button to create new additional rule
     const addButton = page.locator('.js-add-secret-format-button');
     await addButton.click();
+    // Small delay to wait for the element
+    await page.waitForTimeout(200);
     // Wait for the new rule input to appear
-    await page.waitForSelector(`input[name="post_processing_${index}"]`, { timeout: 5000 });
+    try {
+        await page.waitForSelector(`input[name="post_processing_${index}"]`, { timeout: 5000 });
+    }
+    catch (err) {
+        const error = err;
+        console.error(chalk.red(`⨯ Error waiting for post_processing_${index} input: ${error.message}`));
+        if (config.debug) {
+            // Take a screenshot if debugging
+            // make screen quite big
+            await page.setViewportSize({ width: 1920, height: 2000 });
+            console.log(chalk.blue(`Taking screenshot of error state for post_processing_${index}`));
+            const screenshotPath = path.join(process.cwd(), `debug-additional_rule_input_${index}_error_screenshot_${Date.now()}.png`);
+            await page.screenshot({ path: screenshotPath });
+            console.log(chalk.blue(`📸 Screenshot saved to: ${screenshotPath}`));
+        }
+        return false;
+    }
     // Fill in the rule
     await page.fill(`input[name="post_processing_${index}"]`, rule);
     // Select the appropriate radio button
     await page.check(`input[name="post_processing_rule_${index}"][value="${type}"]`);
     // Small delay to ensure the change is registered
     await page.waitForTimeout(200);
+    if (config.debug) {
+        // Take a screenshot if debugging
+        // make screen quite big
+        await page.setViewportSize({ width: 1920, height: 2000 });
+        console.log(chalk.blue(`Taking screenshot of success state for post_processing_${index}`));
+        const screenshotPath = path.join(process.cwd(), `debug-additional_rule_input_${index}_success_screenshot_${Date.now()}.png`);
+        await page.screenshot({ path: screenshotPath });
+        console.log(chalk.blue(`📸 Screenshot saved to: ${screenshotPath}`));
+    }
+    return true;
 }
 async function clickAndWaitForRedirect(page, button, config) {
     // Click the button and wait for navigation
@@ -1050,9 +1171,6 @@ async function performDryRun(page, pattern, config, newPattern) {
     // Wait for the dry run button to be enabled
     // repo level class: js-save-and-dry-run-button or js-custom-pattern-submit-button if new
     // org level class: js-repo-selector-dialog-summary-button
-    const selectorClass = config.scope === 'repo' ? (newPattern ? 'js-custom-pattern-submit-button' : 'js-save-and-dry-run-button') : 'js-repo-selector-dialog-summary-button';
-    const dryRunButton = page.locator(`button.${selectorClass}`).first();
-    let buttonID = null;
     const nullResult = {
         id: '',
         name: pattern.name,
@@ -1060,6 +1178,21 @@ async function performDryRun(page, pattern, config, newPattern) {
         results: [],
         completed: false
     };
+    const selectorClass = config.scope === 'repo' ? (newPattern ? 'js-custom-pattern-submit-button' : 'js-save-and-dry-run-button') : 'js-repo-selector-dialog-summary-button';
+    if ((await page.locator(`button.${selectorClass}`).count()) === 0) {
+        console.warn(chalk.yellow(`⚠️ No dry run button found with class: ${selectorClass}`));
+        if (config?.debug) {
+            const screenshotPath = path.join(process.cwd(), `debug-no_dry_run_button_screenshot_${Date.now()}.png`);
+            // big screen
+            await page.setViewportSize({ width: 1920, height: 2000 });
+            // take a screenshot
+            await page.screenshot({ path: screenshotPath });
+            console.log(chalk.blue(`📸 Screenshot saved to: ${screenshotPath}`));
+        }
+        return nullResult;
+    }
+    const dryRunButton = page.locator(`button.${selectorClass}`).first();
+    let buttonID = null;
     try {
         buttonID = await dryRunButton.getAttribute('id');
         const enabled = await dryRunButton.isEnabled();
@@ -1067,10 +1200,8 @@ async function performDryRun(page, pattern, config, newPattern) {
             console.warn(chalk.yellow('⚠️ Dry run button is not enabled'));
             if (config?.debug) {
                 const screenshotPath = path.join(process.cwd(), `debug-dry_run_button_not_enabled_screenshot_${Date.now()}.png`);
-                // 50% zoom
-                await page.evaluate(() => {
-                    document.body.style.zoom = '50%';
-                });
+                // big screen
+                await page.setViewportSize({ width: 1920, height: 2000 });
                 // take a screenshot
                 await page.screenshot({ path: screenshotPath });
                 console.log(chalk.blue(`📸 Screenshot saved to: ${screenshotPath}`));
