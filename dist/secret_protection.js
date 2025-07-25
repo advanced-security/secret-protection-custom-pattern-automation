@@ -638,6 +638,7 @@ async function fillInPattern(page, pattern, isExisting = false, config) {
     // If this is an existing pattern, clear the fields first, if they are different to what we are uploading
     if (isExisting) {
         let changed = false;
+        const removeExistingAdditionalMatchesSelector = 'button.js-remove-secret-format-button';
         await expandMoreOptions(page);
         const currentSecretFormat = page.locator('input[name="secret_format"]');
         const secretFormatContent = await currentSecretFormat.getAttribute('value');
@@ -669,77 +670,86 @@ async function fillInPattern(page, pattern, isExisting = false, config) {
         }
         // Clear existing additional rules by removing them
         try {
-            const removeExistingAdditionalMatches = await page.locator('button.js-remove-secret-format-button').all();
+            const removeExistingAdditionalMatches = await page.locator(removeExistingAdditionalMatchesSelector).all();
+            if (pattern.regex.additional_match === undefined) {
+                pattern.regex.additional_match = [];
+            }
+            if (pattern.regex.additional_not_match === undefined) {
+                pattern.regex.additional_not_match = [];
+            }
             // if there are no additional matches, and no buttons to remove them, there's no change
-            if (removeExistingAdditionalMatches.length === 0 && pattern.regex.additional_match?.length === 0 && pattern.regex.additional_not_match?.length === 0) {
-                ;
+            if (removeExistingAdditionalMatches.length === 0 && pattern.regex.additional_match.length === 0 && pattern.regex.additional_not_match.length === 0) {
+                if (config.debug) {
+                    console.log(chalk.blue(`✓ No existing additional matches to clear, none to add`));
+                }
             }
             else {
                 // check if the additional matches are already present on the page - if they all are, and there are no extra ones, then we didn't change anything
-                const existingAdditionalMatches = await page.locator('div.js-additional-secret-format').all();
-                if (existingAdditionalMatches.length === (pattern.regex.additional_match?.length ?? 0) + (pattern.regex.additional_not_match?.length ?? 0)) {
+                const existingAdditionalMatchCount = parseInt(await page.locator('div.js-post-processing-expression-count').textContent() || '0', 10);
+                const newAdditionalMatchCount = pattern.regex.additional_match.length + pattern.regex.additional_not_match.length;
+                if (config.debug) {
+                    console.log(chalk.blue(`Found ${existingAdditionalMatchCount} existing additional matches`));
+                    console.log(chalk.blue(`Adding ${newAdditionalMatchCount} additional matches`));
+                }
+                if (existingAdditionalMatchCount === newAdditionalMatchCount) {
+                    const existingAdditionalMatches = (await page.locator('div.js-additional-secret-format').all()).filter(async (match) => (await match.locator('input[type="radio"]').count()) > 0);
+                    if (config.debug) {
+                        console.log(chalk.blue(`Found ${existingAdditionalMatches.length}`));
+                    }
                     // Check if all existing matches are the same as the new ones
-                    let allMatchesSame = true;
-                    let i = 0;
-                    for (i = 0; i < existingAdditionalMatches.length; i++) {
-                        const currentValue = await existingAdditionalMatches[i].locator('input[type="text"]').inputValue();
-                        if (currentValue !== pattern.regex.additional_match?.[i]) {
-                            allMatchesSame = false;
-                            break;
-                        }
-                        // check this is an additional match, by looking at the radio button
+                    let existingMustMatches = [];
+                    let existingMustNotMatches = [];
+                    for (let i = 0; i < existingAdditionalMatchCount && i < existingAdditionalMatches.length; i++) {
+                        const existingMatch = existingAdditionalMatches[i];
                         const radioButton = existingAdditionalMatches[i].locator('input[type="radio"][value="must_match"]');
                         const isMustMatch = await radioButton.isChecked();
-                        if (!isMustMatch) {
-                            allMatchesSame = false;
+                        if (isMustMatch) {
+                            existingMustMatches.push(existingMatch);
+                        }
+                        else {
+                            existingMustNotMatches.push(existingMatch);
+                        }
+                    }
+                    for (let i = 0; i < existingMustMatches.length; i++) {
+                        const existingMustMatch = existingMustMatches[i];
+                        const existingMatchValue = await existingMustMatch.locator('input[type="text"]').inputValue();
+                        const newMatchValue = pattern.regex.additional_match[i];
+                        if (existingMatchValue !== newMatchValue) {
+                            changed = true;
+                            if (config.debug) {
+                                console.log(chalk.blue(`Old value and new value differ: ${existingMatchValue} !== ${newMatchValue}`));
+                            }
                             break;
                         }
                     }
-                    if (!allMatchesSame) {
-                        changed = true;
-                        if (config.debug) {
-                            console.log(chalk.blue(`✓ Existing additional matches differ from new ones, will clear all additional matches`));
-                        }
-                    }
-                    let allNotMatchesSame = true;
-                    for (; i < existingAdditionalMatches.length; i++) {
-                        const currentValue = await existingAdditionalMatches[i].locator('input[type="text"]').inputValue();
-                        if (currentValue !== pattern.regex.additional_not_match?.[i]) {
-                            allNotMatchesSame = false;
-                            break;
-                        }
-                        // check this is an additional NOT match, by looking at the radio button
-                        const radioButton = existingAdditionalMatches[i].locator('input[type="radio"][value="must_not_match"]');
-                        const isMustNotMatch = await radioButton.isChecked();
-                        if (!isMustNotMatch) {
-                            allNotMatchesSame = false;
-                            break;
-                        }
-                    }
-                    if (!allNotMatchesSame) {
-                        changed = true;
-                        if (config.debug) {
-                            console.log(chalk.blue(`✓ Existing additional not matches differ from new ones, will clear all additional matches`));
+                    if (!changed) {
+                        for (let i = 0; i < existingMustNotMatches.length; i++) {
+                            const existingMustNotMatch = existingMustNotMatches[i];
+                            const existingMatchValue = await existingMustNotMatch.locator('input[type="text"]').inputValue();
+                            const newMatchValue = pattern.regex.additional_not_match[i];
+                            if (existingMatchValue !== newMatchValue) {
+                                changed = true;
+                                if (config.debug) {
+                                    console.log(chalk.blue(`Old value and new value differ: ${existingMatchValue} !== ${newMatchValue}`));
+                                }
+                                break;
+                            }
                         }
                     }
                 }
                 else {
+                    if (config.debug) {
+                        console.log(chalk.blue(`✓ Existing additional matches count (${existingAdditionalMatchCount}) does not match new count (${newAdditionalMatchCount}), will clear all additional matches`));
+                    }
                     changed = true;
                 }
                 if (changed || config.forceSubmission) {
-                    const removeExistingAdditionalMatchesSelector = 'button.js-remove-secret-format-button';
                     if (config.debug) {
                         console.log(chalk.blue(`Removing ${await page.locator(removeExistingAdditionalMatchesSelector).count()} existing additional matches`));
                     }
                     while (await page.locator(removeExistingAdditionalMatchesSelector).count() > 0) {
-                        const removeButton = page.locator(removeExistingAdditionalMatchesSelector).first();
-                        if (await removeButton.isVisible() && await removeButton.isEnabled()) {
-                            await removeButton.click();
-                            if (config.debug) {
-                                console.log(chalk.blue(`✓ Removed existing additional match rule`));
-                            }
-                            await page.waitForTimeout(100);
-                        }
+                        const removeButton = page.locator(removeExistingAdditionalMatchesSelector).last();
+                        await removeButton.click();
                     }
                 }
             }
@@ -750,6 +760,16 @@ async function fillInPattern(page, pattern, isExisting = false, config) {
         if (!changed && !config.forceSubmission) {
             console.log(chalk.yellow(`⏩ No changes detected against existing pattern, skipping submission`));
             return false;
+        }
+        // wait a bit
+        await page.waitForTimeout(200);
+        if (config.debug) {
+            console.log(chalk.blue(`✓ Cleared existing pattern fields`));
+            //take screenshot of the cleared pattern
+            await page.setViewportSize({ width: 1920, height: 2000 });
+            const screenshotPath = path.join(process.cwd(), `debug-cleared_pattern_${pattern.name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.png`);
+            await page.screenshot({ path: screenshotPath });
+            console.log(`📸 Screenshot of cleared pattern saved to ${screenshotPath}`);
         }
     }
     else {
@@ -1082,8 +1102,10 @@ async function addAdditionalRule(page, rule, type, index, config) {
         console.log(chalk.blue(`📸 Screenshot saved to: ${screenshotPath}`));
     }
     // Click add button to create new additional rule
-    const addButton = page.locator('.js-add-secret-format-button');
+    const addButton = page.locator('button.js-add-secret-format-button:text("Add requirement")');
     await addButton.click();
+    // XXX: sometimes when this is clicked when an existing pattern is being filled in, it seems to mistakenly trigger a dry-run!
+    // if that happens, and we don't see the post_postprocessing element, we need to cancel the dry-run and try again
     // Small delay to wait for the element
     await page.waitForTimeout(200);
     // Wait for the new rule input to appear
