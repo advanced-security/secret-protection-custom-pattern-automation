@@ -12,19 +12,18 @@ Options:
   --server <url>                    GitHub server URL (default: https://github.com)
   --scope <scope>                   Target scope: repo, org, enterprise (auto-detected for repos, and assumed to be org if not a repository)
   --pattern <file>                   Pattern file(s) to upload (can be specified multiple times)
-  --patterns-to-include <pattern>   Patterns to include in upload (can be specified multiple times)
-  --patterns-to-exclude <pattern>   Patterns to exclude from upload (can be specified multiple times)
+  --include-pattern-name <pattern>  Patterns to include in upload (can be specified multiple times)
+  --exclude-pattern-name <pattern>  Patterns to exclude from upload (can be specified multiple times)
   --dry-run-threshold <n>           Maximum allowed dry-run results before skipping (default: 0)
   --enable-push-protection          Enable push protection for uploaded patterns
-  --no-change-push-protection       Do not change push protection settings for patterns
+  --keep-push-protection            Do not change push protection settings for patterns
   --disable-push-protection         Disable push protection for uploaded patterns
   --download-existing               Download existing patterns to existing-patterns.yml
   --delete-existing                 Delete existing patterns
   --validate-only                   Validate patterns without uploading (no authentication required)
-  --validate                        Validate patterns before upload (default: true)
-  --no-validate                     Skip pattern validation
-  --headless                        Run in headless mode (default: true)
-  --no-headless                     Run with visible browser
+  --validate/--no-validate          Validate patterns before upload (default: true)
+  --headless/--no-headless          Run in headless mode (default: true)
+  --force-submission                Force submission even if tests fail
   --debug                           Enable debug mode with screenshots and verbose logging
   --dry-run-all-repos               Run dry-run on all repositories in organization (org scope only)
   --dry-run-repo <repo>             Specific repositories for dry-run (can be specified multiple times)

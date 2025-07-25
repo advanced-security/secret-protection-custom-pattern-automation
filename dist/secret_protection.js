@@ -126,7 +126,7 @@ function parseArgs() {
         patternsToExclude: exclude_patterns,
         dryRunThreshold: dryRunThreshold,
         enablePushProtection: args['enable-push-protection'] ?? false,
-        noChangePushProtection: args['no-change-push-protection'] ?? false,
+        noChangePushProtection: args['keep-push-protection'] ?? false,
         disablePushProtection: args['disable-push-protection'] ?? false,
         headless: args.headless ?? true,
         downloadExisting: args['download-existing'] ?? false,
@@ -136,7 +136,13 @@ function parseArgs() {
         debug: args.debug ?? false,
         dryRunAllRepos: args['dry-run-all-repos'] ?? false,
         dryRunRepoList: dryRunRepoList,
+        forceSubmission: args['force-submission'] ?? false
     };
+    if (config.debug) {
+        console.log(chalk.blue('🐛 Debug mode enabled'));
+        console.log(chalk.gray(`Config: \n${JSON.stringify(config, null, 2)}`));
+        console.log(chalk.grey(`Args: \n${JSON.stringify(args, null, 2)}`));
+    }
     // check scope is valid
     const validScopes = ['repo', 'org', 'enterprise'];
     if (!validScopes.includes(config.scope)) {
@@ -510,11 +516,11 @@ async function uploadPatterns(context, config) {
             }
             for (const pattern of patternFile.patterns) {
                 if (config.patternsToInclude && !config.patternsToInclude.includes(pattern.name)) {
-                    console.log(`Skipping pattern ${pattern.name} not in the include list`);
+                    console.log(`Skipping pattern '${pattern.name}' not in the include list`);
                     continue;
                 }
                 if (config.patternsToExclude && config.patternsToExclude.includes(pattern.name)) {
-                    console.log(`Skipping pattern ${pattern.name} in the exclude list`);
+                    console.log(`Skipping pattern '${pattern.name}' in the exclude list`);
                     continue;
                 }
                 try {
@@ -522,7 +528,7 @@ async function uploadPatterns(context, config) {
                 }
                 catch (err) {
                     const error = err;
-                    console.error(chalk.red(`✖ Failed to process pattern ${pattern.name ?? "**unnamed pattern**"} in file ${patternPath}:`, error.message));
+                    console.error(chalk.red(`✖ Failed to process pattern '${pattern.name ?? "**unnamed pattern**"}' in file ${patternPath}:`, error.message));
                     unprocessedPatterns.set(patternPath, unprocessedPatterns.get(patternPath) || []);
                     unprocessedPatterns.get(patternPath)?.push([pattern?.name ?? "**unnamed pattern**", error.message]);
                     if (err instanceof Error && err.message.includes('Target page, context or browser has been closed')) {
@@ -602,7 +608,7 @@ async function expandMoreOptions(page) {
 function comparePatterns(patternA, patternB) {
     return patternA?.trim() === patternB?.trim();
 }
-async function fillInPattern(page, pattern, isExisting = false, _config) {
+async function fillInPattern(page, pattern, isExisting = false, config) {
     // If this is an existing pattern, clear the fields first, if they are different to what we are uploading
     if (isExisting) {
         let changed = false;
@@ -684,7 +690,7 @@ async function fillInPattern(page, pattern, isExisting = false, _config) {
         catch (error) {
             console.log(chalk.gray(`Note: Could not clear all existing additional rules: ${error}`));
         }
-        if (!changed) {
+        if (!changed && !config.forceSubmission) {
             console.log(chalk.yellow(`⏩ No changes detected against existing pattern, skipping submission`));
             return false;
         }
@@ -838,7 +844,7 @@ async function processPattern(context, config, pattern, existingPatterns) {
             // Test the pattern
             const testResult = await testPattern(page, pattern, config);
             if (!testResult) {
-                throw new Error(`Pattern test failed for ${pattern.name}`);
+                throw new Error(`Pattern test failed for '${pattern.name}'`);
             }
             // Perform dry run
             const dryRunResult = await performDryRun(page, pattern, config, !existingPatternUrl);
@@ -875,7 +881,7 @@ async function processPattern(context, config, pattern, existingPatterns) {
             const { enablePushProtection } = await inquirer.prompt({
                 name: 'enablePushProtection',
                 type: 'confirm',
-                message: `Do you want to enable push protection for pattern "${pattern.name}"?`,
+                message: `Do you want to enable push protection for pattern '${pattern.name}'?`,
                 default: false
             });
             enablePushProtectionFlag = enablePushProtection;
@@ -905,7 +911,17 @@ async function testPattern(page, pattern, config) {
             data: ' '
         };
     }
-    await page.fill('div.CodeMirror-code', pattern.test.data);
+    else {
+        // trim the test data
+        pattern.test.data = pattern.test.data.trim();
+    }
+    if (config.debug) {
+        console.log(chalk.blue(`🔄 Testing pattern '${pattern.name}' with data: ${pattern.test.data}`));
+    }
+    const codeMirror = await page.locator('div.CodeMirror-code').first();
+    await codeMirror.focus();
+    await codeMirror.click();
+    await codeMirror.pressSequentially(pattern.test.data);
     let testSuccess = null;
     let tries = 0;
     // Check for test results
@@ -1305,7 +1321,7 @@ async function togglePushProtectionConfig(page, pattern, config, enablePushProte
         // if we didn't find the pattern, wait, try again, it might not be in the database yet
         if (!tableRow) {
             if (config.debug) {
-                console.log(chalk.gray(`Debug: Pattern "${pattern.name}" not found in push protection configuration`));
+                console.log(chalk.gray(`Debug: Pattern '${pattern.name}' not found in push protection configuration`));
             }
             await page.waitForTimeout(2000); // wait a bit before retrying
         }
@@ -1365,7 +1381,7 @@ async function displayDryRunResults(results) {
 }
 async function confirmPatternAction(pattern, dryRunResult, config) {
     if (dryRunResult.hits > config.dryRunThreshold) {
-        console.log(chalk.red(`\n✖ Pattern "${pattern.name}" exceeds dry run threshold (${dryRunResult.hits} > ${config.dryRunThreshold})`));
+        console.log(chalk.red(`\n✖ Pattern exceeds dry run threshold (${dryRunResult.hits} > ${config.dryRunThreshold})`));
         const answer = await inquirer.prompt([{
                 type: 'confirm',
                 name: 'proceed',
@@ -1373,7 +1389,7 @@ async function confirmPatternAction(pattern, dryRunResult, config) {
                 default: false
             }]);
         if (!answer.proceed) {
-            console.log(chalk.yellow(`⏭️  Skipping pattern "${pattern.name}" due to dry run threshold`));
+            console.log(chalk.yellow(`⏭️  Skipping pattern publication`));
             return false;
         }
     }
