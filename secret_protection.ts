@@ -308,6 +308,34 @@ async function goto(page: Page, url: string, config: Config): Promise<boolean> {
     return true;
 }
 
+async function reload(page: Page, config: Config): Promise<boolean> {
+    while (true) {
+        try {
+            const result = await page.reload({ waitUntil: 'load' });
+
+            if (!result || !result.ok()) {
+                console.warn(`⚠️  Failed to reload page: ${result?.status() || 'unknown error'}`);
+                return false;
+            }
+
+            break;
+        } catch (err) {
+            const error = err as Error;
+            if (error.message.startsWith('page.reload: net::ERR')) {
+                if (error.message.startsWith('page.reload: net::ERR_ABORTED')) {
+                    if (config.debug) {
+                        console.warn(chalk.yellow(`⚠️  Network error occurred while reloading page: ${error.message}`));
+                    }
+                    continue;
+                }
+            }
+            console.error(chalk.red(`⨯ Error reloading page: ${error.message}`));
+            return false;
+        }
+    }
+    return true;
+}
+
 async function login(server: string, config: Config) {
     // look for existing state stored in .state file locally
     const stateFilePath = path.join(process.cwd(), '.state');
@@ -1427,8 +1455,11 @@ async function performDryRun(page: Page, pattern: Pattern, config: Config, newPa
         await page.waitForTimeout(5000); // Wait 5 seconds
         // TODO: back off a bit after some time, maybe a logistic curve? Grow exponentially at first, then slow down the growth
 
-        await page.reload();
-        await page.waitForLoadState('load');
+        const success = await reload(page, config);
+        if (!success) {
+            console.error(chalk.red(`✖ Failed to reload page during dry run`));
+            return nullResult;
+        }
         attempts++;
     }
     process.stdout.write('\n');
