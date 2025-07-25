@@ -21,7 +21,10 @@ Provides a Playwright-based command-line interface for uploading, testing, and m
 - **Pattern Validation**: Pattern structure validation
 - **Existing Pattern Download**: Export current patterns to YAML format for backup/review
 - **Pattern Updates**: Detect and update existing patterns when re-running with same pattern names
+- **Pattern Deletion**: Remove existing patterns from the target
 - **Push Protection Management**: Configure push protection at repository, organization and enterprise levels
+- **Pattern Filtering**: Include or exclude specific patterns by name during upload
+- **Force Submission**: Override test failures and submit patterns anyway
 
 ## 📦 Installation
 
@@ -39,6 +42,14 @@ npm run build
 
 ## 🛠️ Usage
 
+### Basic Syntax
+
+```bash
+npm start -- [options] <target>
+```
+
+Where `<target>` is a repository (owner/repo), organization, or enterprise.
+
 ### Basic Usage
 
 ```bash
@@ -47,6 +58,9 @@ npm start -- owner/repo --pattern example-patterns.yml
 
 # Download existing patterns to YAML format
 npm start -- owner/repo --download-existing
+
+# Delete existing patterns from a repository
+npm start -- owner/repo --delete-existing
 
 # Upload multiple pattern files
 npm start -- owner/repo --pattern generic.yml --pattern vendor.yml
@@ -88,28 +102,32 @@ npm start --  myorg --pattern patterns.yml --dry-run-repo-list repo1 --dry-run-r
 # Disable push protection for patterns
 npm start -- owner/repo --pattern patterns.yml --disable-push-protection 
 
-# Upload without changing existing push protection settings
-npm start -- owner/repo --pattern patterns.yml --no-change-push-protection owner/repo
+# Force submission even if tests fail
+npm start -- --pattern patterns.yml --force-submission owner/repo
 ```
 
 ### Command Line Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--pattern <file>` | Pattern file(s) to upload (repeatable) | - |
 | `--server <url>` | GitHub server URL | `https://github.com` |
 | `--scope <scope>` | Target scope: repo, org, enterprise | Auto-detected |
-| `--dry-run-threshold <n>` | Max allowed dry-run results before requiring confirmation | 50 |
-| `--enable-push-protection` | Enable push protection for all uploaded/changed patterns | false |
-| `--no-change-push-protection` | Do not change push protection settings for patterns | false |
-| `--disable-push-protection` | Disable push protection for all uploaded/changed patterns | false |
+| `--pattern <file>` | Pattern file(s) to upload (repeatable) | - |
+| `--include-pattern-name <pattern>` | Patterns to include in upload (repeatable) | - |
+| `--exclude-pattern-name <pattern>` | Patterns to exclude from upload (repeatable) | - |
+| `--dry-run-threshold <n>` | Max allowed dry-run results before skipping | 0 |
+| `--enable-push-protection` | Enable push protection for uploaded patterns | false |
+| `--keep-push-protection` | Do not change push protection settings for patterns | false |
+| `--disable-push-protection` | Disable push protection for uploaded patterns | false |
 | `--download-existing` | Download existing patterns to `existing-patterns.yml` | false |
+| `--delete-existing` | Delete existing patterns | false |
 | `--validate-only` | Validate patterns without uploading (no auth required) | false |
 | `--validate` / `--no-validate` | Pattern validation before upload | true |
 | `--headless` / `--no-headless` | Browser visibility | true |
+| `--force-submission` | Force submission even if tests fail | false |
 | `--debug` | Enable debug mode with screenshots and verbose logging | false |
 | `--dry-run-all-repos` | Run dry-run on all repositories in organization (org scope only) | false |
-| `--dry-run-repo-list <repo>` | Specific repositories for dry-run (repeatable) | - |
+| `--dry-run-repo <repo>` | Specific repositories for dry-run (repeatable) | - |
 | `--help` | Show help message | - |
 
 ## 📁 Pattern File Format
@@ -230,11 +248,18 @@ Waiting for dry run to complete.....
 
 ### Dry Run Threshold
 
-When results exceed the configured threshold (default: 50), the tool will prompt for confirmation:
+The `--dry-run-threshold` option controls when patterns are automatically skipped due to too many matches. The default value is 0, meaning any dry-run results will require manual confirmation:
 
 ```text
-✖ Pattern "Overly Broad Pattern" exceeds dry run threshold (127 > 50)
+✖ Pattern "Overly Broad Pattern" exceeds dry run threshold (127 > 0)
 ? Do you want to proceed anyway? (y/N)
+```
+
+You can set a higher threshold to automatically proceed with patterns that have fewer matches:
+
+```bash
+# Allow up to 25 matches before requiring confirmation
+npm start -- --pattern patterns.yml --dry-run-threshold 25 owner/repo
 ```
 
 ## 🔧 Configuration
@@ -291,33 +316,41 @@ The tool can work with patterns from the [secret-scanning-custom-patterns](https
 npm start -- --pattern ../secret-scanning-custom-patterns/generic/patterns.yml owner/repo
 ```
 
-### Working with Organizations
-
-```bash
-# Upload to all repositories in an organization
-npm start -- --pattern patterns.yml myorg
-
-# Upload with dry-run on all repositories in the organization
-npm start -- --pattern patterns.yml --dry-run-all-repos myorg
-
-# Upload with dry-run on specific repositories only
-npm start -- --pattern patterns.yml --dry-run-repo-list repo1 --dry-run-repo-list repo2 myorg
-
-# Upload with explicit organization scope
-npm start -- --pattern patterns.yml --scope org myorg
-```
-
 ### Pattern Updates
 
-The tool automatically detects existing patterns by name and updates them:
+The tool automatically detects existing patterns by name and updates them.
+
+### Pattern Filtering
+
+You can selectively include or exclude patterns by name:
 
 ```bash
-# First run - creates new patterns
-npm start -- --pattern patterns.yml owner/repo
+# Upload only specific patterns by name
+npm start -- --pattern patterns.yml --include-pattern-name "API Key Pattern" --include-pattern-name "Database Token" owner/repo
 
-# Second run - updates existing patterns if changes detected
-npm start -- --pattern patterns.yml owner/repo
+# Upload all patterns except specific ones
+npm start -- --pattern patterns.yml --exclude-pattern-name "Test Pattern" --exclude-pattern-name "Development Key" owner/repo
+
+# Combine filtering with other options
+npm start -- --pattern patterns.yml --include-pattern-name "Production" --enable-push-protection owner/repo
 ```
+
+### Pattern Deletion
+
+Remove existing patterns from the target:
+
+```bash
+# Delete all existing patterns from a repository
+npm start -- owner/repo --delete-existing
+
+# Delete existing patterns from an organization
+npm start -- myorg --delete-existing --scope org
+
+# Delete existing patterns from an organization, filtered by name
+npm start -- myorg --delete-existing --scope org --include-pattern-name "API Key Pattern" --include-pattern-name "Database Token"
+```
+
+Deletions are confirmed with a prompt.
 
 ## 🛡️ Security and Quality Considerations
 

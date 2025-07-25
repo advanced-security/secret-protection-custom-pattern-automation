@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import Table from 'cli-table3';
-import { Pattern, PatternFile } from './secret_protection.js';
+import { Pattern, PatternFile, Config } from './secret_protection.js';
 
 export interface ValidationResult {
     isValid: boolean;
@@ -26,7 +26,7 @@ export class PatternValidator {
         return result;
     }
 
-    public static validatePatternFile(patternFile: PatternFile): ValidationResult {
+    public static validatePatternFile(patternFile: PatternFile, config: Config): ValidationResult {
         const aggregateResult: ValidationResult = {
             isValid: true,
             errors: [],
@@ -44,6 +44,15 @@ export class PatternValidator {
 
         const patternNames = new Set<string>();
         for (const pattern of (patternFile.patterns || [])) {
+
+            if (config.patternsToInclude && !config.patternsToInclude.includes(pattern.name)) {
+                continue;
+            }
+
+            if (config.patternsToExclude && config.patternsToExclude.includes(pattern.name)) {
+                continue;
+            }
+
             const patternResult = this.validatePattern(pattern);
 
             // Check for duplicate names

@@ -19,9 +19,10 @@ export async function main() {
         process.exit(1);
     }
     console.log(chalk.bold.blue(`🔐 Secret Scanning Custom Pattern Automation Tool`));
-    console.log(chalk.gray(`Using server: ${config.server}`));
-    console.log(chalk.gray(`Target: ${config.target}`));
-    console.log(chalk.gray(`Scope: ${config.scope}\n`));
+    if (config.server !== 'https://github.com') {
+        console.log(chalk.gray(`Using server: ${config.server}`));
+    }
+    console.log(chalk.gray(`Target: ${config.target} (${config.scope})\n`));
     // Handle validation-only mode
     if (config.validateOnly) {
         if (!config.patterns || config.patterns.length === 0) {
@@ -288,9 +289,21 @@ async function deleteExistingPatterns(context, config) {
             console.log(chalk.blue('ℹ No patterns to delete based on include/exclude filters'));
             return;
         }
+        const deleteCount = patternsToDelete.length;
+        // confirm deletion of N patterns
+        const confirmDelete = await inquirer.prompt({
+            type: 'confirm',
+            name: 'confirm',
+            message: `Are you sure you want to delete ${deleteCount} existing pattern${deleteCount === 1 ? '' : 's'}?`,
+            default: false,
+        });
+        if (!confirmDelete.confirm) {
+            console.log(chalk.yellow('⚠️  Deletion cancelled by user'));
+            return;
+        }
         // progress bar
         const progressBar = new cliProgress.MultiBar({}, cliProgress.Presets.shades_classic);
-        const progressBarSimple = progressBar.create(patternsToDelete.length, 0);
+        const progressBarSimple = progressBar.create(deleteCount, 0);
         for (const [name, url] of patternsToDelete) {
             try {
                 const id = url.split('/').pop()?.split('?')[0] || '';
@@ -516,11 +529,15 @@ async function uploadPatterns(context, config) {
             }
             for (const pattern of patternFile.patterns) {
                 if (config.patternsToInclude && !config.patternsToInclude.includes(pattern.name)) {
-                    console.log(`Skipping pattern '${pattern.name}' not in the include list`);
+                    if (config.debug) {
+                        console.log(chalk.blue(`Skipping pattern '${pattern.name}' not in the include list`));
+                    }
                     continue;
                 }
                 if (config.patternsToExclude && config.patternsToExclude.includes(pattern.name)) {
-                    console.log(`Skipping pattern '${pattern.name}' in the exclude list`);
+                    if (config.debug) {
+                        console.log(chalk.blue(`Skipping pattern '${pattern.name}' in the exclude list`));
+                    }
                     continue;
                 }
                 try {
@@ -571,7 +588,7 @@ async function loadPatternFile(filePath) {
     }
 }
 function validatePatterns(patternFile, config) {
-    const fileResult = PatternValidator.validatePatternFile(patternFile);
+    const fileResult = PatternValidator.validatePatternFile(patternFile, config);
     if (fileResult.isValid && !config.validateOnly) {
         console.log(chalk.green('✔ All patterns passed validation'));
     }
@@ -579,7 +596,16 @@ function validatePatterns(patternFile, config) {
         PatternValidator.printValidationReport(fileResult);
     }
     // Individual pattern validation for summary reporting
-    const patternResults = patternFile.patterns.map(pattern => ({
+    const patternResults = patternFile.patterns.filter(pattern => {
+        // Filter out patterns that are not in the include list or are in the exclude list
+        if (config.patternsToInclude && !config.patternsToInclude.includes(pattern.name)) {
+            return false;
+        }
+        if (config.patternsToExclude && config.patternsToExclude.includes(pattern.name)) {
+            return false;
+        }
+        return true;
+    }).map(pattern => ({
         name: pattern.name,
         result: PatternValidator.validatePattern(pattern)
     }));

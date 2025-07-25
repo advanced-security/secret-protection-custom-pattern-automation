@@ -13,7 +13,7 @@ export class PatternValidator {
         result.isValid = result.errors.length === 0;
         return result;
     }
-    static validatePatternFile(patternFile) {
+    static validatePatternFile(patternFile, config) {
         const aggregateResult = {
             isValid: true,
             errors: [],
@@ -28,6 +28,12 @@ export class PatternValidator {
         }
         const patternNames = new Set();
         for (const pattern of (patternFile.patterns || [])) {
+            if (config.patternsToInclude && !config.patternsToInclude.includes(pattern.name)) {
+                continue;
+            }
+            if (config.patternsToExclude && config.patternsToExclude.includes(pattern.name)) {
+                continue;
+            }
             const patternResult = this.validatePattern(pattern);
             // Check for duplicate names
             if (patternNames.has(pattern.name)) {
