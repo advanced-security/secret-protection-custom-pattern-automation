@@ -836,7 +836,10 @@ async function expandMoreOptions(page: Page): Promise<void> {
     }
 }
 
-function comparePatterns(patternA: string | undefined, patternB: string | undefined): boolean {
+function comparePatterns(patternA: string | undefined | null, patternB: string | undefined | null): boolean {
+    if (patternA === null || patternA === undefined || patternB === null || patternB === undefined) {
+        return false;
+    }
     return patternA?.trim() === patternB?.trim();
 }
 
@@ -933,9 +936,10 @@ async function fillInPattern(page: Page, pattern: Pattern, isExisting: boolean =
 
                     for (let i = 0; i < existingMustMatches.length; i++) {
                         const existingMustMatch = existingMustMatches[i];
+                        const newMatch = pattern.regex.additional_match[i];
                         const existingMatchValue = await existingMustMatch.locator('input[type="text"]').inputValue();
                         const newMatchValue = pattern.regex.additional_match[i];
-                        if (existingMatchValue !== newMatchValue) {
+                        if (!comparePatterns(existingMatchValue, newMatchValue)) {
                             changed = true;
                             if (config.debug) {
                                 console.log(chalk.blue(`Old value and new value differ: ${existingMatchValue} !== ${newMatchValue}`))
@@ -949,7 +953,7 @@ async function fillInPattern(page: Page, pattern: Pattern, isExisting: boolean =
                             const existingMustNotMatch = existingMustNotMatches[i];
                             const existingMatchValue = await existingMustNotMatch.locator('input[type="text"]').inputValue();
                             const newMatchValue = pattern.regex.additional_not_match[i];
-                            if (existingMatchValue !== newMatchValue) {
+                            if (!comparePatterns(existingMatchValue, newMatchValue)) {
                                 changed = true;
                                 if (config.debug) {
                                     console.log(chalk.blue(`Old value and new value differ: ${existingMatchValue} !== ${newMatchValue}`))
@@ -999,7 +1003,7 @@ async function fillInPattern(page: Page, pattern: Pattern, isExisting: boolean =
 
     } else {
         const nameField = page.locator('input[name="display_name"]');
-        await nameField.pressSequentially(pattern.name);
+        await nameField.fill(pattern.name);
     }
 
     if (pattern.regex.start || pattern.regex.end || pattern.regex.additional_match || pattern.regex.additional_not_match) {
@@ -1008,21 +1012,18 @@ async function fillInPattern(page: Page, pattern: Pattern, isExisting: boolean =
 
     const secretFormat = page.locator('input[name="secret_format"]');
     await secretFormat.clear();
-    await secretFormat.click();
-    await secretFormat.pressSequentially(pattern.regex.pattern);
+    await secretFormat.fill(pattern.regex.pattern);
 
     if (pattern.regex.start) {
         const beforeSecretInput = page.locator('input[name="before_secret"]');
         await beforeSecretInput.clear();
-        await beforeSecretInput.click();
-        await beforeSecretInput.pressSequentially(pattern.regex.start);
+        await beforeSecretInput.fill(pattern.regex.start);
     }
 
     if (pattern.regex.end) {
         const afterSecretInput = page.locator('input[name="after_secret"]');
-        await afterSecretInput.click();
         await afterSecretInput.clear();
-        await afterSecretInput.pressSequentially(pattern.regex.end);
+        await afterSecretInput.fill(pattern.regex.end);
     }
 
     if (pattern.regex.additional_match && pattern.regex.additional_match.length > 0) {
@@ -1053,9 +1054,6 @@ async function fillInPattern(page: Page, pattern: Pattern, isExisting: boolean =
             }
         }
     }
-
-    // click away from entries
-    await page.locator('body').click();
 
     // pause briefly
     await page.waitForTimeout(200);
@@ -1317,7 +1315,7 @@ async function testPattern(page: Page, pattern: Pattern, config: Config): Promis
     await codeMirror.focus();
     await codeMirror.click();
 
-    await codeMirror.pressSequentially(pattern.test.data);
+    await codeMirror.fill(pattern.test.data);
 
     let testSuccess: string | null = null;
     let tries = 0;
@@ -1397,9 +1395,6 @@ async function addAdditionalRule(page: Page, rule: string, type: 'must_match' | 
     const addButton = page.locator('button.js-add-secret-format-button:text("Add requirement")');
     await addButton.click();
 
-    // XXX: sometimes when this is clicked when an existing pattern is being filled in, it seems to mistakenly trigger a dry-run!
-    // if that happens, and we don't see the post_postprocessing element, we need to cancel the dry-run and try again
-
     // Small delay to wait for the element
     await page.waitForTimeout(200);
 
@@ -1422,10 +1417,14 @@ async function addAdditionalRule(page: Page, rule: string, type: 'must_match' | 
     }
 
     // Fill in the rule
-    await page.fill(`input[name="post_processing_${index}"]`, rule);
+    const ruleInput = page.locator(`input[name="post_processing_${index}"]`);
+
+    await ruleInput.fill(rule);
 
     // Select the appropriate radio button
-    await page.check(`input[name="post_processing_rule_${index}"][value="${type}"]`);
+    const ruleRadioButton = page.locator(`input[name="post_processing_rule_${index}"][value="${type}"]`);
+
+    await ruleRadioButton.check();
 
     // Small delay to ensure the change is registered
     await page.waitForTimeout(200);
