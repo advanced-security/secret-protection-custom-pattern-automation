@@ -128,6 +128,7 @@ npm start -- --pattern patterns.yml --force-submission owner/repo
 | `--debug` | Enable debug mode with screenshots and verbose logging | false |
 | `--dry-run-all-repos` | Run dry-run on all repositories in organization (org scope only) | false |
 | `--dry-run-repo <repo>` | Specific repositories for dry-run (repeatable) | - |
+| `--max-test-tries` | Maximum number of 0.1s to wait for the test to complete | 25 |
 | `--help` | Show help message | - |
 
 ## 📁 Pattern File Format

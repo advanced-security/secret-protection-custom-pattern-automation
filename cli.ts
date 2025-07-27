@@ -28,6 +28,7 @@ Options:
   --debug                           Enable debug mode with screenshots and verbose logging
   --dry-run-all-repos               Run dry-run on all repositories in organization (org scope only)
   --dry-run-repo <repo>             Specific repositories for dry-run (can be specified multiple times)
+  --max-test-tries <number>         Maximum number of 0.1s to wait for the test to complete
   --help                            Show this help message
 
 # Optional: Set default server for GitHub Enterprise

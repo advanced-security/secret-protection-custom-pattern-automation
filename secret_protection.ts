@@ -95,6 +95,7 @@ export interface Config {
     dryRunAllRepos?: boolean;
     dryRunRepoList?: string[];
     forceSubmission?: boolean;
+    maxTestTries: number;
 }
 
 let state: BrowserStorageState | null = null;
@@ -193,6 +194,7 @@ function parseArgs(): Config | undefined {
             validate: true,
             dryRunAllRepos: true,
             dryRunThreshold: 0,
+            maxTestTries: 25,
         };
     }
 
@@ -222,6 +224,11 @@ function parseArgs(): Config | undefined {
 
     const dryRunRepoList = args['dry-run-repo'] ? (Array.isArray(args['dry-run-repo']) ? args['dry-run-repo'] : [args['dry-run-repo']]) : []
 
+    let maxTestTries = 25;
+    if (args['max-test-tries'] !== undefined) {
+        maxTestTries = parseInt(args['max-test-tries'], 10);
+    }
+
     const config: Config = {
         server: args.server ?? process.env.GITHUB_SERVER ?? 'https://github.com',
         target,
@@ -241,7 +248,8 @@ function parseArgs(): Config | undefined {
         debug: args.debug ?? false,
         dryRunAllRepos: args['dry-run-all-repos'] ?? false,
         dryRunRepoList: dryRunRepoList,
-        forceSubmission: args['force-submission'] ?? false
+        forceSubmission: args['force-submission'] ?? false,
+        maxTestTries: maxTestTries,
     };
 
     if (config.debug) {
@@ -1055,30 +1063,7 @@ async function fillInPattern(page: Page, pattern: Pattern, isExisting: boolean =
         }
     }
 
-    // pause briefly
-    await page.waitForTimeout(200);
-
-    // look for errors
-    const errorExists = await page.locator('p.error').count() !== 0 || await page.locator('div.errored').count() !== 0;
-
-    if (errorExists) {
-        const errorMessage = await page.locator('p.error').first().textContent();
-        const fieldName = await page.locator('div.errored').first().locator('input').first().getAttribute('aria-label');
-
-        console.error(chalk.red(`⨯ Error in field "${fieldName}": ${errorMessage}`));
-        return false;
-    }
-
-    console.log(chalk.green(`✓ Pattern filled in`));
-
-    if (config.debug) {
-        // take a screenshot of the filled in pattern
-        // make screen quite big
-        await page.setViewportSize({ width: 1920, height: 2000 });
-        const screenshotPath = path.join(process.cwd(), `debug-filled_pattern_${pattern.name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.png`);
-        await page.screenshot({ path: screenshotPath });
-        console.log(`📸 Screenshot of filled pattern saved to ${screenshotPath}`);
-    }
+    console.log(chalk.green(`✓ Pattern filled in - checking for test result and looking for errors`));
 
     return true;
 }
@@ -1337,7 +1322,7 @@ async function testPattern(page: Page, pattern: Pattern, config: Config): Promis
 
         tries++;
 
-        if (tries > 50) {
+        if (tries > config.maxTestTries) {
             console.warn(chalk.yellow(`⚠️  Pattern test is taking longer than expected...`));
             break;
         }
