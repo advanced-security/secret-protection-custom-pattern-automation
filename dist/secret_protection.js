@@ -175,7 +175,7 @@ function parseArgs() {
         console.warn(chalk.yellow('⚠️ Both --disable-push-protection and --no-change-push-protection are set. Choose one of them only.'));
         return undefined;
     }
-    if (config.scope === 'org' && !config.dryRunAllRepos && dryRunRepoList.length === 0) {
+    if (config.scope === 'org' && (!config.validateOnly && config.patterns !== undefined && config.patterns?.length > 0) && !config.dryRunAllRepos && dryRunRepoList.length === 0) {
         console.error(chalk.red('✖ No specific repositories provided for dry-run. To run dry-run on all repositories, use --dry-run-all-repos'));
         return undefined;
     }
@@ -1001,7 +1001,7 @@ async function processPattern(context, config, pattern, existingPatterns) {
             }
         }
         const actionPast = existingPatternUrl ? 'updated' : 'created';
-        console.log(chalk.green(`✓ Successfully ${actionPast} pattern: ${pattern.name}`));
+        console.log(chalk.green(`✓ Successfully ${actionPast}`));
     }
     finally {
         await page.close();
@@ -1011,7 +1011,7 @@ async function testPattern(page, pattern, config) {
     const ignoreTestResult = pattern.test?.data === undefined || pattern.test.data.trim() === '';
     // Add test data
     if (!pattern.test?.data) {
-        console.warn(chalk.yellow(`⚠️  No test data found for pattern: ${pattern.name}`));
+        console.warn(chalk.yellow(`⚠️  No test data found`));
         // test with a single space, so we can dry-run the pattern
         pattern.test = {
             data: ' '

@@ -289,7 +289,7 @@ function parseArgs(): Config | undefined {
         return undefined;
     }
 
-    if (config.scope === 'org' && !config.dryRunAllRepos && dryRunRepoList.length === 0) {
+    if (config.scope === 'org' && (!config.validateOnly && config.patterns !== undefined && config.patterns?.length > 0) && !config.dryRunAllRepos && dryRunRepoList.length === 0) {
         console.error(chalk.red('✖ No specific repositories provided for dry-run. To run dry-run on all repositories, use --dry-run-all-repos'));
         return undefined;
     }
@@ -1269,7 +1269,7 @@ async function processPattern(context: BrowserContext, config: Config, pattern: 
         }
 
         const actionPast = existingPatternUrl ? 'updated' : 'created';
-        console.log(chalk.green(`✓ Successfully ${actionPast} pattern: ${pattern.name}`));
+        console.log(chalk.green(`✓ Successfully ${actionPast}`));
 
     } finally {
         await page.close();
@@ -1281,7 +1281,7 @@ async function testPattern(page: Page, pattern: Pattern, config: Config): Promis
 
     // Add test data
     if (!pattern.test?.data) {
-        console.warn(chalk.yellow(`⚠️  No test data found for pattern: ${pattern.name}`));
+        console.warn(chalk.yellow(`⚠️  No test data found`));
         // test with a single space, so we can dry-run the pattern
         pattern.test = {
             data: ' '
