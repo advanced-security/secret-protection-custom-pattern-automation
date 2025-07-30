@@ -7,6 +7,10 @@
   "bin": {
     "secret-scanner": "dist/cli.js"
   },
+  "repository": {
+    "type": "github",
+    "url": "https://github.com/advanced-security/secret-protection-custom-pattern-upload"
+  },
   "scripts": {
     "build": "tsc",
     "start": "npm run build --silent && node dist/cli.js",
@@ -47,7 +51,8 @@
     "security",
     "automation",
     "playwright",
-    "patterns"
+    "devsecops",
+    "appsec"
   ],
   "author": "GitHub Advanced Security Team",
   "license": "MIT"
