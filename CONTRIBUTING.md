@@ -15,7 +15,7 @@ Please:
 * sign commits
 * format code with Prettier
 * lint code with ESLint (run `npm run lint` to check, `npm run lint:fix` to auto-fix)
-* add unit tests with the `assert` module, and run them with `npm test`
+* add unit tests and run them with `npm test`. Tests are documented in [TESTING.md](TESTING.md)
 * do end-to-end testing with the script against a test organization, Enterprise and repository, and check the results are as expected
 
 ## Submitting changes
