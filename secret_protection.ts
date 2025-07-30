@@ -928,8 +928,8 @@ async function fillInPattern(page: Page, pattern: Pattern, isExisting: boolean =
                     }
 
                     // Check if all existing matches are the same as the new ones
-                    let existingMustMatches: Locator[] = [];
-                    let existingMustNotMatches: Locator[] = [];
+                    const existingMustMatches: Locator[] = [];
+                    const existingMustNotMatches: Locator[] = [];
 
                     for (let i = 0; i < existingAdditionalMatchCount && i < existingAdditionalMatches.length; i++) {
                         const existingMatch = existingAdditionalMatches[i];
@@ -944,7 +944,6 @@ async function fillInPattern(page: Page, pattern: Pattern, isExisting: boolean =
 
                     for (let i = 0; i < existingMustMatches.length; i++) {
                         const existingMustMatch = existingMustMatches[i];
-                        const newMatch = pattern.regex.additional_match[i];
                         const existingMatchValue = await existingMustMatch.locator('input[type="text"]').inputValue();
                         const newMatchValue = pattern.regex.additional_match[i];
                         if (!comparePatterns(existingMatchValue, newMatchValue)) {

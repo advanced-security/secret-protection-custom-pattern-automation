@@ -706,8 +706,8 @@ async function fillInPattern(page, pattern, isExisting = false, config) {
                         console.log(chalk.blue(`Found ${existingAdditionalMatches.length}`));
                     }
                     // Check if all existing matches are the same as the new ones
-                    let existingMustMatches = [];
-                    let existingMustNotMatches = [];
+                    const existingMustMatches = [];
+                    const existingMustNotMatches = [];
                     for (let i = 0; i < existingAdditionalMatchCount && i < existingAdditionalMatches.length; i++) {
                         const existingMatch = existingAdditionalMatches[i];
                         const radioButton = existingAdditionalMatches[i].locator('input[type="radio"][value="must_match"]');
@@ -721,7 +721,6 @@ async function fillInPattern(page, pattern, isExisting = false, config) {
                     }
                     for (let i = 0; i < existingMustMatches.length; i++) {
                         const existingMustMatch = existingMustMatches[i];
-                        const newMatch = pattern.regex.additional_match[i];
                         const existingMatchValue = await existingMustMatch.locator('input[type="text"]').inputValue();
                         const newMatchValue = pattern.regex.additional_match[i];
                         if (!comparePatterns(existingMatchValue, newMatchValue)) {
