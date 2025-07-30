@@ -1,0 +1,54 @@
+name: Invalid Test Patterns
+patterns:
+  - name: ""  # Missing name
+    regex:
+      version: 1
+      pattern: "api[_-]?key[_-]?['\"]?([a-zA-Z0-9]{32})['\"]?"
+    test:
+      data: "api_key='abcd1234567890abcdef1234567890ab'"
+
+  - name: "Pattern with Empty Regex"
+    regex:
+      version: 1
+      pattern: ""  # Empty pattern
+    test:
+      data: "some test data"
+
+  - name: "Pattern with Short Regex"
+    regex:
+      version: 1
+      pattern: "ab"  # Too short
+    test:
+      data: "ab"
+
+  - name: "Duplicate Name Pattern"
+    regex:
+      version: 1
+      pattern: "duplicate[0-9]+"
+    test:
+      data: "duplicate123"
+
+  - name: "Duplicate Name Pattern"  # Duplicate name
+    regex:
+      version: 1
+      pattern: "another[0-9]+"
+    test:
+      data: "another456"
+
+  - name: "Pattern with Invalid Additional Match"
+    regex:
+      version: 1
+      pattern: "valid[0-9]+"
+      additional_match: "not an array"  # Should be array
+    test:
+      data: "valid123"
+
+  - name: "Pattern with Empty Additional Match Rule"
+    regex:
+      version: 1
+      pattern: "valid[0-9]+"
+      additional_match:
+        - "good rule"
+        - ""  # Empty rule
+    test:
+      data: "valid123"
