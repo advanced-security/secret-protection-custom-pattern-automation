@@ -9,7 +9,7 @@ import inquirer from 'inquirer';
 import cliProgress from 'cli-progress';
 import { exit } from 'process';
 import { PatternValidator } from './validator.js';
-import { HELP_TEXT } from './cli.js';
+import { HELP_TEXT } from './help.js';
 let state = null;
 export async function main() {
     const config = parseArgs();
@@ -72,7 +72,7 @@ export async function main() {
         browser.close();
     }
 }
-function parseArgs() {
+export function parseArgs() {
     const args = minimist(process.argv.slice(2));
     const target = args._.pop();
     const patterns = args.pattern ? (Array.isArray(args.pattern) ? args.pattern : [args.pattern]) : undefined;
@@ -579,7 +579,7 @@ async function uploadPatterns(context, config) {
         console.log(chalk.green('✓ All patterns processed successfully'));
     }
 }
-async function loadPatternFile(filePath) {
+export async function loadPatternFile(filePath) {
     const content = await fs.readFile(filePath, 'utf-8');
     try {
         return yaml.load(content);
@@ -637,7 +637,7 @@ async function expandMoreOptions(page) {
         await beforeSecretInput.waitFor({ state: 'visible' });
     }
 }
-function comparePatterns(patternA, patternB) {
+export function comparePatterns(patternA, patternB) {
     if (patternA === null || patternA === undefined || patternB === null || patternB === undefined) {
         return false;
     }
@@ -1560,7 +1560,7 @@ async function confirmPatternAction(pattern, dryRunResult, config) {
     }
     return true;
 }
-function buildUrl(config, ...pathSegments) {
+export function buildUrl(config, ...pathSegments) {
     let basePath = '';
     if (config.scope === 'repo') {
         const [owner, repo] = config.target.split('/', 2);

@@ -9,7 +9,7 @@ import inquirer from 'inquirer';
 import cliProgress from 'cli-progress';
 import { exit } from 'process';
 import { PatternValidator } from './validator.js';
-import { HELP_TEXT } from './cli.js';
+import { HELP_TEXT } from './help.js';
 export interface Pattern {
     name: string;
     type?: string;
@@ -171,7 +171,7 @@ export async function main() {
     }
 }
 
-function parseArgs(): Config | undefined {
+export function parseArgs(): Config | undefined {
     const args = minimist(process.argv.slice(2));
 
     const target: string | undefined = args._.pop();
@@ -781,7 +781,7 @@ async function uploadPatterns(context: BrowserContext, config: Config): Promise<
     }
 }
 
-async function loadPatternFile(filePath: string): Promise<PatternFile> {
+export async function loadPatternFile(filePath: string): Promise<PatternFile> {
     const content = await fs.readFile(filePath, 'utf-8');
 
     try {
@@ -844,7 +844,7 @@ async function expandMoreOptions(page: Page): Promise<void> {
     }
 }
 
-function comparePatterns(patternA: string | undefined | null, patternB: string | undefined | null): boolean {
+export function comparePatterns(patternA: string | undefined | null, patternB: string | undefined | null): boolean {
     if (patternA === null || patternA === undefined || patternB === null || patternB === undefined) {
         return false;
     }
@@ -1938,7 +1938,7 @@ async function confirmPatternAction(pattern: Pattern, dryRunResult: DryRunResult
     return true;
 }
 
-function buildUrl(config: Config, ...pathSegments: string[]): string {
+export function buildUrl(config: Config, ...pathSegments: string[]): string {
     let basePath = '';
 
     if (config.scope === 'repo') {
