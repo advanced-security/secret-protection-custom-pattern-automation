@@ -24,7 +24,7 @@ Please fork the repository, and raise a Pull Request (PR) for review.
 
 Remember to update the [README](README.md) and [CHANGELOG](CHANGELOG.md).
 
-Your changes must be acceptable under the [LICENSE](LICENSE) of the project.
+Contributions to this project are [released](https://help.github.com/articles/github-terms-of-service/#6-contributions-under-repository-license) to the public under the project's open source [license](LICENSE).
 
 ## Code of conduct
 
