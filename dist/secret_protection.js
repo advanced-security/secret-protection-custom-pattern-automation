@@ -388,7 +388,7 @@ async function downloadExistingPatterns(context, config) {
                 console.warn(chalk.yellow('⚠️ No custom patterns found on the page'));
                 return;
             }
-            if ((await customPatternList.textContent())?.includes('There are no custom patterns for this repository')) {
+            if ((await customPatternList.textContent())?.includes('There are no custom patterns for this')) {
                 progressBar.stop();
                 console.log(chalk.blue('ℹ No custom patterns exist on this repository'));
                 return;

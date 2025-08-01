@@ -551,7 +551,7 @@ async function downloadExistingPatterns(context: BrowserContext, config: Config)
                 return;
             }
 
-            if ((await customPatternList.textContent())?.includes('There are no custom patterns for this repository')) {
+            if ((await customPatternList.textContent())?.includes('There are no custom patterns for this')) {
                 progressBar.stop();
                 console.log(chalk.blue('ℹ No custom patterns exist on this repository'));
                 return;
