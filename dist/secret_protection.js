@@ -981,7 +981,6 @@ async function processPattern(context, config, pattern, existingPatterns) {
         else {
             // publish if the pattern is not already published - we have a pattern there that matches our upload and is unpublished
             // if the title is "Unpublished pattern", we can assume it is unpublished
-            // look for text 'Security & analysis' in the title
             const title = await page.locator('.Subhead-heading').first().textContent();
             if (title?.includes('Unpublished pattern')) {
                 await publishPattern(page);
