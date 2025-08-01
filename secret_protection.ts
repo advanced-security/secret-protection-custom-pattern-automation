@@ -294,6 +294,17 @@ export function parseArgs(): Config | undefined {
         return undefined;
     }
 
+    if (config.scope === 'enterprise' && (!config.validateOnly && config.patterns !== undefined && config.patterns?.length > 0)) {
+        if (config.dryRunAllRepos) {
+            console.error(chalk.red('✖ Dry-run on all repositories is not supported for enterprise scope. Please specify individual repositories using --dry-run-repo'));
+        }
+
+        if (dryRunRepoList.length === 0) {
+            console.error(chalk.red('✖ No repositories provided for dry-run. Please specify individual repositories using --dry-run-repo'));
+            return undefined;
+        }
+    }
+
     return config;
 }
 
@@ -612,7 +623,7 @@ async function downloadExistingPatterns(context: BrowserContext, config: Config)
                     }
 
                     // record if it is published or not
-                    const subHead = await patternPage.locator('h1.Subhead-heading').textContent();
+                    const subHead = await patternPage.locator('Subhead-heading').first().textContent();
                     const isPublished = subHead?.includes('Update pattern');
 
                     // pull out additional matches, and if they are Must match or Must not Match
@@ -1079,6 +1090,9 @@ async function findExistingPatterns(context: BrowserContext, config: Config): Pr
 
         if (!success) {
             console.error(chalk.red(`⨯ Failed to load security analysis page`));
+            if (config.debug) {
+                console.log(chalk.gray(`Debug: Failed to load URL ${url}`));
+            }
             return null;
         }
 
@@ -1233,7 +1247,7 @@ async function processPattern(context: BrowserContext, config: Config, pattern: 
         } else {
             // publish if the pattern is not already published - we have a pattern there that matches our upload and is unpublished
             // if the title is "Unpublished pattern", we can assume it is unpublished
-            const title = await page.locator('h1.Subhead-heading').textContent();
+            const title = await page.locator('.Subhead-heading').first().textContent();
             if (title?.includes('Unpublished pattern')) {
                 await publishPattern(page);
             }
@@ -1260,7 +1274,8 @@ async function processPattern(context: BrowserContext, config: Config, pattern: 
             enablePushProtectionFlag = enablePushProtection;
         }
 
-        if (config.scope === 'repo') {
+        if (config.scope === 'repo' || await page.locator('button[name="push_protection_enabled"]').count() > 0) {
+            // we're either at repo level, or using a version of the GitHub UI before push protection config was created
             await togglePushProtection(page, enablePushProtectionFlag);
         } else {
             if (enablePushProtectionFlag) {
@@ -1492,7 +1507,7 @@ async function performDryRun(page: Page, pattern: Pattern, config: Config, newPa
 
     const selectorClass = config.scope === 'repo' ? (newPattern ? 'js-custom-pattern-submit-button' : 'js-save-and-dry-run-button') : 'js-repo-selector-dialog-summary-button';
 
-    if ((await page.locator(`button.${selectorClass}`).count()) === 0) {
+    if ((await page.locator(`.${selectorClass}`).count()) === 0) {
         console.warn(chalk.yellow(`⚠️ No dry run button found with class: ${selectorClass}`));
         if (config?.debug) {
             const screenshotPath = path.join(process.cwd(), `debug-no_dry_run_button_screenshot_${Date.now()}.png`);
@@ -1505,11 +1520,9 @@ async function performDryRun(page: Page, pattern: Pattern, config: Config, newPa
         return nullResult;
     }
 
-    const dryRunButton = page.locator(`button.${selectorClass}`).first();
-    let buttonID: string | null | undefined = null;
+    const dryRunButton = page.locator(`.${selectorClass}`).first();
 
     try {
-        buttonID = await dryRunButton.getAttribute('id');
         const enabled = await dryRunButton.isEnabled();
 
         if (!enabled) {
@@ -1539,86 +1552,88 @@ async function performDryRun(page: Page, pattern: Pattern, config: Config, newPa
         return nullResult;
     }
 
-    // if there's no button ID, we are at repo level. We can just click the button and start the dry-run
-    if (!buttonID) {
+    // we are at repo level. We can just click the button and start the dry-run
+    if (config.scope === 'repo') {
         await clickAndWaitForRedirect(page, dryRunButton, config);
     } else {
-        // if we are at org level, we need to handle a repo selector dialog. Do we do all repos in the org, or select a few?
-        if (buttonID === 'dialog-show-repo-selector-dialog') {
+        let dialog: Locator;
+        if (config.server !== 'https://github.com') {
+            // click button, then wait for dialog
+            await dryRunButton.click();
+            dialog = await page.locator('details-dialog[aria-label="Where do you want to perform this dry run?"]').first();
+        } else {
+            // if we are at org or Enterprise level, we need to handle a repo selector dialog. Do we do all repos in the org, or select a few?
+
             // Emulate clicking the button to open the repo selector dialog
             // Playwright struggles with this click, so we need to directly trigger the dialog
             // we need to change the dialog state to 'open', using the dialog 'repo-selector-dialog'
             // Wait for the dialog to appear
-            const dialog = await showDialog(page, 'repo-selector-dialog');
+            dialog = await showDialog(page, 'repo-selector-dialog');
+        }
 
-            // Select all repositories if we're in org mode and dryRunAllRepos is true
-            if (config?.dryRunAllRepos && config.scope === 'org') {
-                const repoCheckboxes = dialog.locator('input[type="radio"][id="dry_run_repo_selection_all_repos"]');
-                await repoCheckboxes.check();
-            } else if (config?.dryRunRepoList && (config.scope === 'org' || config.scope === 'enterprise')) {
+        // Select all repositories if we're in org mode and dryRunAllRepos is true
+        if (config?.dryRunAllRepos && config.scope === 'org') {
+            const repoCheckboxes = dialog.locator('input[type="radio"][id="dry_run_repo_selection_all_repos"]');
+            await repoCheckboxes.check();
+        } else if (config?.dryRunRepoList && (config.scope === 'org' || config.scope === 'enterprise')) {
 
-                // select the "Select specific repositories" option
-                if (config.scope === 'org') {
-                    const specificReposOption = dialog.locator('input[type="radio"][id="dry_run_repo_selection_selected_repos"]');
-                    await specificReposOption.check();
+            // select the "Select specific repositories" option
+            if (config.scope === 'org') {
+                const specificReposOption = dialog.locator('input[type="radio"][id="dry_run_repo_selection_selected_repos"]');
+                await specificReposOption.check();
+            }
+
+            // Select specific repositories
+            for (let repo of config.dryRunRepoList) {
+                if (config.debug) {
+                    console.log(chalk.blue(`Selecting repository for dry run: ${repo}`));
                 }
 
-                // Select specific repositories
-                for (let repo of config.dryRunRepoList) {
+                // if it has a `/` in it, we assume it's a full repository name like `org/repo`, and at the org level, split off just the repo name
+                if (config.scope === 'org' && repo.includes('/')) {
+                    repo = repo.split('/', 2)[1];
+                }
+
+                // put them into the search field
+                const searchInput = dialog.locator('input#repo_id');
+                await searchInput.click();
+                await searchInput.fill(repo);
+                // Wait for the dropdown to update and be visible
+                const repoDropDown = dialog.locator(`anchored-position[anchor="repo_id"]`);
+                await repoDropDown.waitFor({ state: 'visible' });
+                const repoOptions = await repoDropDown.locator(`div[role="option"]`).all();
+                let found = false;
+                for (const option of repoOptions) {
+                    const optionLabel = (await option.locator('span.ActionListItem-label').textContent())?.trim();
                     if (config.debug) {
-                        console.log(chalk.blue(`Selecting repository for dry run: ${repo}`));
+                        console.log(chalk.gray(`Checking repository option: ${optionLabel}`));
                     }
-
-                    // if it has a `/` in it, we assume it's a full repository name like `org/repo`, and at the org level, split off just the repo name
-                    if (config.scope === 'org' && repo.includes('/')) {
-                        repo = repo.split('/', 2)[1];
-                    }
-
-                    // put them into the search field
-                    const searchInput = dialog.locator('input#repo_id');
-                    await searchInput.click();
-                    await searchInput.fill(repo);
-                    // Wait for the dropdown to update and be visible
-                    const repoDropDown = dialog.locator(`anchored-position[anchor="repo_id"]`);
-                    await repoDropDown.waitFor({ state: 'visible' });
-                    const repoOptions = await repoDropDown.locator(`div[role="option"]`).all();
-                    let found = false;
-                    for (const option of repoOptions) {
-                        const optionLabel = (await option.locator('span.ActionListItem-label').textContent())?.trim();
-                        if (config.debug) {
-                            console.log(chalk.gray(`Checking repository option: ${optionLabel}`));
-                        }
-                        if (optionLabel === repo) {
-                            await option.click();
-                            found = true;
-                            console.log(chalk.blue(`Selected dry-run repository: ${repo}`));
-                            break;
-                        }
-                    }
-                    if (!found) {
-                        console.warn(chalk.yellow(`Repository "${repo}" not found in the dry-run dropdown`));
+                    if (optionLabel === repo) {
+                        await option.click();
+                        found = true;
+                        console.log(chalk.blue(`Selected dry-run repository: ${repo}`));
+                        break;
                     }
                 }
-
-                // check if we have any selected repositories
-                await dialog.locator('button[title="Remove dry run repository"]').first().waitFor({ state: 'visible' });
-
-                const selectedRepos = await dialog.locator('div#dry-run-selected-repos > div > ul > li').all();
-                if (selectedRepos.length === 0) {
-                    console.warn(chalk.yellow('No repositories selected for dry run, please check your configuration'));
-                    return nullResult;
+                if (!found) {
+                    console.warn(chalk.yellow(`Repository "${repo}" not found in the dry-run dropdown`));
                 }
             }
 
-            // Click the confirm button
-            const confirmButton = dialog.locator('button.js-org-repo-selector-dialog-dry-run-button');
+            // check if we have any selected repositories
+            await dialog.locator('button[title="Remove dry run repository"]').first().waitFor({ state: 'visible' });
 
-            await clickAndWaitForRedirect(page, confirmButton, config);
-        } else {
-            // error, exit
-            console.error(chalk.red(`✖ Unexpected button ID: ${buttonID}`));
-            return nullResult;
+            const selectedRepos = await dialog.locator('div#dry-run-selected-repos > div > ul > li').all();
+            if (selectedRepos.length === 0) {
+                console.warn(chalk.yellow('No repositories selected for dry run, please check your configuration'));
+                return nullResult;
+            }
         }
+
+        // Click the confirm button
+        const confirmButton = dialog.locator('button.js-org-repo-selector-dialog-dry-run-button');
+
+        await clickAndWaitForRedirect(page, confirmButton, config);
     }
 
     // Extract pattern ID from the URL for tracking - split at / and pick final entry, then split at ? and pick first part
